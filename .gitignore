@@ -1,0 +1,17 @@
+# Python
+trademind_env/
+__pycache__/
+*.pyc
+*.pkl
+*.joblib
+.env
+
+# Data
+data/prices.csv
+
+# Node
+frontend/node_modules/
+frontend/build/
+
+ml/rf_model.pkl
+ml/scaler.pkl
