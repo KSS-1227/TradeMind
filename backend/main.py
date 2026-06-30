@@ -174,7 +174,11 @@ def get_gold_price():
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
     return result
+@app.get("/news")
 def get_market_news():
-    """General Indian market news with sentiment"""
-    headlines = fetch_market_news(days=3)
-    return {"headlines": headlines, "count": len(headlines)}
+    """General Indian market news"""
+    try:
+        headlines = fetch_market_news(days=3)
+        return {"headlines": headlines, "count": len(headlines)}
+    except Exception as e:
+        return {"headlines": [], "count": 0, "error": str(e)}
