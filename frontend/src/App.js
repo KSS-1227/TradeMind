@@ -771,23 +771,41 @@ function CommoditiesPage() {
     </div>
   );
 }
-
 function NewsPage() {
+  const [news, setNews]       = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${API}/news`)
+      .then(r => setNews(r.data.headlines || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
   return (
     <div className="fade-in">
       <div style={{marginBottom:20}}>
         <h1 style={{fontSize:20,fontWeight:800,color:"#F0F4F8",marginBottom:4}}>Market News</h1>
-        <p style={{color:"#64748B",fontSize:13}}>Latest Indian market headlines analysed by FinBERT sentiment.</p>
+        <p style={{color:"#64748B",fontSize:13}}>Latest Indian market headlines.</p>
       </div>
       <div className="card">
-        <div style={{color:"#64748B",padding:"40px 0",textAlign:"center",lineHeight:1.8}}>
-          📰 Live news feed requires NewsAPI integration.<br/>
-          <span style={{fontSize:12}}>Add your NewsAPI key to the backend to enable this section.</span>
-        </div>
+        {loading && <div style={{color:"#64748B",padding:40,textAlign:"center"}}>Loading news...</div>}
+        {!loading && news.length === 0 && (
+          <div style={{color:"#64748B",padding:40,textAlign:"center"}}>No news available right now.</div>
+        )}
+        {news.map((headline, i) => (
+          <div key={i} className="news-item">
+            <div style={{fontSize:13,fontWeight:600,color:"#F0F4F8",lineHeight:1.5}}>
+              {headline}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
 }
+
+
 
 export default function App() {
   const [page,      setPage]      = useState("dashboard");
