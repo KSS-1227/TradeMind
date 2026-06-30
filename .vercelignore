@@ -5,3 +5,10 @@ data/
 agents/
 Dockerfile
 startup.py
+main.py
+startup.py
+*.py
+*.pkl
+*.csv
+frontend/node_modules/
+frontend/build/
