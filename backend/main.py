@@ -14,6 +14,7 @@ from ml.backtest import run_backtest
 # Ensure model exists on startup
 from startup import ensure_model_exists
 ensure_model_exists()
+from data.fetch_news import fetch_market_news
 
 
 app = FastAPI(
@@ -173,3 +174,7 @@ def get_gold_price():
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
     return result
+def get_market_news():
+    """General Indian market news with sentiment"""
+    headlines = fetch_market_news(days=3)
+    return {"headlines": headlines, "count": len(headlines)}
