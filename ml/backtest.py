@@ -46,7 +46,7 @@ def generate_historical_signals(symbol: str, period: str = "2y") -> pd.DataFrame
 
 # ── 2. Backtrader Strategy ─────────────────────────────────
 class TradeMindStrategy(bt.Strategy):
-    params = dict(signals=None)
+    params = dict(signals=None, stop_loss_pct=0.05, max_dd_pct=0.15)
 
     def __init__(self):
         self.signal_map = {}
@@ -55,39 +55,52 @@ class TradeMindStrategy(bt.Strategy):
                 date_str = str(row["Date"])[:10]
                 self.signal_map[date_str] = row["signal"]
 
-        self.trades      = 0
-        self.wins        = 0
-        self.trade_log   = []
+        self.trades = 0
+        self.wins = 0
+        self.trade_log = []
         self.entry_price = None
+        self.peak_value = self.broker.getvalue()
 
     def next(self):
         date_str = self.datas[0].datetime.date(0).strftime("%Y-%m-%d")
-        signal   = self.signal_map.get(date_str, "HOLD")
-        price    = self.datas[0].close[0]
+        signal = self.signal_map.get(date_str, "HOLD")
+        price = self.datas[0].close[0]
+
+        # Track portfolio peak for max drawdown check
+        current_value = self.broker.getvalue()
+        self.peak_value = max(self.peak_value, current_value)
+        current_dd = (self.peak_value - current_value) / self.peak_value
+
+        # Force exit if max drawdown limit breached
+        if self.position and current_dd > self.params.max_dd_pct:
+            self.sell(size=self.position.size)
+            self.trade_log.append({"date": date_str, "action": "FORCE_EXIT_DD", "price": round(price,2)})
+            self.entry_price = None
+            return
+
+        # Stop-loss check
+        if self.position and self.entry_price:
+            loss_pct = (self.entry_price - price) / self.entry_price
+            if loss_pct > self.params.stop_loss_pct:
+                self.sell(size=self.position.size)
+                self.trade_log.append({"date": date_str, "action": "STOP_LOSS", "price": round(price,2)})
+                self.entry_price = None
+                return
 
         if signal == "BUY" and not self.position:
             size = int(self.broker.getcash() * 0.95 / price)
             if size > 0:
                 self.buy(size=size)
                 self.entry_price = price
-                self.trade_log.append({
-                    "date":   date_str,
-                    "action": "BUY",
-                    "price":  round(price, 2),
-                })
+                self.trade_log.append({"date": date_str, "action": "BUY", "price": round(price,2)})
 
         elif signal == "SELL" and self.position:
             self.sell(size=self.position.size)
             self.trades += 1
             if price > (self.entry_price or price):
                 self.wins += 1
-            self.trade_log.append({
-                "date":   date_str,
-                "action": "SELL",
-                "price":  round(price, 2),
-            })
+            self.trade_log.append({"date": date_str, "action": "SELL", "price": round(price,2)})
             self.entry_price = None
-
 # ── 3. Run backtest ────────────────────────────────────────
 def run_backtest(symbol: str, initial_cash: float = 100000.0,
                  period: str = "2y") -> dict:
