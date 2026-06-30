@@ -47,7 +47,7 @@ def build_training_data() -> pd.DataFrame:
     all_data = []
     for symbol in STOCKS:
         print(f"  Preparing {symbol}...")
-        df = fetch_prices(symbol, period="2y")
+        df = fetch_prices(symbol, period="5y")
         if df.empty:
             continue
         df = add_technical_indicators(df)

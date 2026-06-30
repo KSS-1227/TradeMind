@@ -219,7 +219,7 @@ def generate_benchmark(period: str = "2y") -> list:
         return []
 
 if __name__ == "__main__":
-    result = run_backtest("RELIANCE.NS", period="2y")
+    result = run_backtest("RELIANCE.NS", period="5y")
 
     print(f"\n{'='*50}")
     print(f"BACKTEST RESULTS — {result['symbol']}")
