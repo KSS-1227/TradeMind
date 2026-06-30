@@ -99,14 +99,10 @@ def generate_signal(research_data: dict) -> dict:
 
 
 def combine_signals(rf_signal: str, rf_conf: float, sentiment: dict) -> tuple:
-    """
-    Combine RF model signal with sentiment
-    Sentiment can upgrade/downgrade confidence
-    """
-    dominant    = sentiment["dominant"]
-    sent_conf   = sentiment["confidence"]
+    rf_conf   = rf_conf if rf_conf else 0.5
+    dominant  = sentiment.get("dominant", "neutral")
+    sent_conf = sentiment.get("confidence", 0) or 0
 
-    # Sentiment boost rules
     if rf_signal == "BUY" and dominant == "positive":
         return "BUY", min(rf_conf + sent_conf * 0.2, 0.99)
     elif rf_signal == "SELL" and dominant == "negative":
