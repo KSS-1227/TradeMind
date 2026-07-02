@@ -123,7 +123,8 @@ def combine_signals(rf_signal: str, rf_conf: float, sentiment: dict) -> tuple:
         return "HOLD", (rf_conf + sent_conf) / 2
     # Neutral sentiment — return RF signal unchanged
     else:
-        return rf_signal, rf_conf
+        avg = (rf_conf + sent_conf) / 2
+        return rf_signal, avg
 
 def calculate_risk(close_prices: pd.Series, signal: str) -> dict:
     """Calculate key risk metrics"""
