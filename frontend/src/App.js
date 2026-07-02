@@ -260,7 +260,9 @@ function SignalCard({ signal }) {
   const [tab, setTab]     = useState("signal");
   const [prices, setPrices] = useState([]);
   const sig  = SIG_COLOR[signal.signal] || SIG_COLOR.HOLD;
-  const conf = Math.round((signal.confidence||0)*100);
+  const conf = signal.confidence?.toString().includes('%')
+    ? parseInt(signal.confidence)
+    : Math.round((Number(signal.confidence) || 0) * 100);
 
   useEffect(() => {
     const sym = signal.symbol?.replace(".NS","") || "";
@@ -572,7 +574,7 @@ function PortfolioPage() {
                   <span className="mono" style={{color:"#00C9A7"}}>{a.weight}%</span>
                   <span className="mono" style={{color:"#F0F4F8"}}>₹{fmt(a.amount)}</span>
                   <span className="sig-badge" style={{background:SIG_COLOR[a.signal]?.bg||"#334155",color:SIG_COLOR[a.signal]?.text||"#fff",fontSize:10,padding:"3px 0"}}>{a.signal}</span>
-                  <span className="mono" style={{color:"#64748B",fontSize:12}}>{a.confidence?`${Math.round(a.confidence*100)}%`:"—"}</span>
+                  <span className="mono" style={{color:"#64748B",fontSize:12}}>{a.confidence?(a.confidence?.toString().includes('%')?parseInt(a.confidence):`${Math.round(a.confidence*100)}`)+"%" :"—"}</span>
                 </div>
               ))}
               <div style={{marginTop:12,padding:"10px 16px",background:"#132840",borderRadius:8,fontSize:12,color:"#64748B"}}>
@@ -723,7 +725,7 @@ function CommoditiesPage() {
                   {sigG.signal}
                 </span>
                 <div style={{fontSize:11,color:"#64748B",marginTop:4}}>
-                  Confidence: {Math.round((sigG.confidence||0)*100)}%
+                  Confidence: {sigG.confidence?.toString().includes('%') ? parseInt(sigG.confidence) : Math.round((sigG.confidence||0)*100)}%
                 </div>
               </div>
             )}
