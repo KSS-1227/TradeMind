@@ -14,7 +14,7 @@ def research(symbol: str) -> dict:
     print(f"[Research Agent] Fetching data for {symbol}...")
 
     # Fetch price data with indicators
-    df = fetch_prices(symbol, period="1y")
+    df = fetch_prices(symbol, period="6mo")
     if df.empty:
         return {"error": f"No price data for {symbol}"}
 

@@ -112,7 +112,7 @@ def predict_signal(symbol: str, model=None, scaler=None) -> dict:
             scaler = joblib.load(SCALER_PATH)
 
     # Fetch latest data
-    df = fetch_prices(symbol, period="1y")
+    df = fetch_prices(symbol, period="6mo")
     if df.empty:
         return {"error": f"No data for {symbol}"}
 
