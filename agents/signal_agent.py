@@ -99,18 +99,29 @@ def generate_signal(research_data: dict) -> dict:
 
 
 def combine_signals(rf_signal: str, rf_conf: float, sentiment: dict) -> tuple:
-    rf_conf   = rf_conf if rf_conf else 0.5
+    """
+    Combine RF signal with sentiment.
+    If sentiment unavailable, fall back to pure RF confidence.
+    """
+    rf_conf   = float(rf_conf) if rf_conf and not (rf_conf != rf_conf) else 0.5
     dominant  = sentiment.get("dominant", "neutral")
-    sent_conf = sentiment.get("confidence", 0) or 0
+    sent_conf = float(sentiment.get("confidence", 0) or 0)
 
+    # If no news available — return pure RF signal unchanged
+    if sent_conf == 0:
+        return rf_signal, rf_conf
+
+    # Sentiment agrees — boost confidence
     if rf_signal == "BUY" and dominant == "positive":
         return "BUY", min(rf_conf + sent_conf * 0.2, 0.99)
     elif rf_signal == "SELL" and dominant == "negative":
         return "SELL", min(rf_conf + sent_conf * 0.2, 0.99)
+    # Sentiment disagrees — downgrade to HOLD
     elif rf_signal == "BUY" and dominant == "negative":
         return "HOLD", (rf_conf + sent_conf) / 2
     elif rf_signal == "SELL" and dominant == "positive":
         return "HOLD", (rf_conf + sent_conf) / 2
+    # Neutral sentiment — return RF signal unchanged
     else:
         return rf_signal, rf_conf
 

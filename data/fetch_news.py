@@ -1,14 +1,8 @@
 # data/fetch_news.py
-import requests
-import os
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
+# data/fetch_news.py
+import yfinance as yf
+import feedparser
 
-load_dotenv()
-
-NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-
-# Stock name mapping for better news search
 STOCK_NAMES = {
     "RELIANCE.NS":   "Reliance Industries",
     "TCS.NS":        "Tata Consultancy Services",
@@ -20,81 +14,54 @@ STOCK_NAMES = {
     "SBIN.NS":       "State Bank of India",
     "ITC.NS":        "ITC Limited",
     "ADANIENT.NS":   "Adani Enterprises",
-    # ── Commodities ──
     "GOLDBEES.NS":   "gold price India MCX",
     "SILVERBEES.NS": "silver price India MCX",
-    "NIFTYBEES.NS":  "Nifty50 index India market",
-    "GC=F":  "gold price India MCX commodity",
-    "SI=F":  "silver price India MCX commodity",
+    "NIFTYBEES.NS":  "Nifty50 index India",
+    "GC=F":          "gold commodity MCX India",
+    "SI=F":          "silver commodity MCX India",
 }
 
 def fetch_news(symbol: str, days: int = 7) -> list:
-    """Fetch recent news headlines for a stock"""
-    company_name = STOCK_NAMES.get(symbol, symbol)
-    from_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    """Fetch news using yfinance built-in news — no API key needed"""
+    headlines = []
 
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": f"{company_name} NSE stock India",
-        "from": from_date,
-        "language": "en",
-        "sortBy": "relevancy",
-        "pageSize": 10,
-        "apiKey": NEWSAPI_KEY,
-    }
-
+    # Method 1 — yfinance built-in news
     try:
-        response = requests.get(url, params=params)
-        data = response.json()
-
-        if data.get("status") != "ok":
-            print(f"NewsAPI error: {data.get('message')}")
-            return []
-
-        headlines = []
-        for article in data.get("articles", []):
-            title = article.get("title", "")
-            desc = article.get("description", "")
-            if title:
-                headlines.append(f"{title}. {desc}")
-
-        print(f"Fetched {len(headlines)} headlines for {company_name}")
-        return headlines
-
+        ticker = yf.Ticker(symbol)
+        news   = ticker.news
+        if news:
+            for item in news[:8]:
+                content = item.get("content", {})
+                title   = content.get("title", "") or item.get("title", "")
+                summary = content.get("summary", "") or ""
+                if title:
+                    headlines.append(f"{title}. {summary}".strip(". "))
+            print(f"yfinance: {len(headlines)} headlines for {symbol}")
     except Exception as e:
-        print(f"Error fetching news for {symbol}: {e}")
-        return []
+        print(f"yfinance news error for {symbol}: {e}")
+
+    # Method 2 — Google News RSS fallback
+    if not headlines:
+        try:
+            company = STOCK_NAMES.get(symbol, symbol.replace(".NS",""))
+            query   = company.replace(" ", "+")
+            url     = f"https://news.google.com/rss/search?q={query}+stock+India&hl=en-IN&gl=IN&ceid=IN:en"
+            feed    = feedparser.parse(url)
+            for entry in feed.entries[:6]:
+                if entry.get("title"):
+                    headlines.append(entry.title)
+            print(f"RSS fallback: {len(headlines)} headlines for {symbol}")
+        except Exception as e:
+            print(f"RSS fallback error: {e}")
+
+    return headlines
 
 def fetch_market_news(days: int = 3) -> list:
-    """Fetch general Indian market news"""
-    url = "https://newsapi.org/v2/everything"
-    params = {
-        "q": "NSE BSE Indian stock market trading",
-        "from": (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
-        "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": 15,
-        "apiKey": NEWSAPI_KEY,
-    }
-
+    """General Indian market news via RSS"""
     try:
-        response = requests.get(url, params=params)
-        data = response.json()
-        headlines = [a.get("title", "") for a in data.get("articles", []) if a.get("title")]
-        print(f"Fetched {len(headlines)} market headlines")
-        return headlines
+        url  = "https://news.google.com/rss/search?q=NSE+BSE+Indian+stock+market&hl=en-IN&gl=IN&ceid=IN:en"
+        feed = feedparser.parse(url)
+        return [e.title for e in feed.entries[:15] if e.get("title")]
     except Exception as e:
-        print(f"Error fetching market news: {e}")
+        print(f"Market news error: {e}")
         return []
-
-if __name__ == "__main__":
-    # Test with Reliance
-    headlines = fetch_news("RELIANCE.NS")
-    print("\nSample headlines:")
-    for h in headlines[:3]:
-        print(f"  - {h[:100]}")
-
-    print("\nMarket news:")
-    market = fetch_market_news()
-    for h in market[:3]:
-        print(f"  - {h[:100]}")

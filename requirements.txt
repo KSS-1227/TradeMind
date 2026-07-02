@@ -20,3 +20,4 @@ requests
 pyotp
 websockets
 apscheduler
+feedparser
