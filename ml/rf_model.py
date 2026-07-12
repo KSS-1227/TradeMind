@@ -14,7 +14,8 @@ from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 
 from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
-
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.frozen import FrozenEstimator
 MODEL_PATH            = "ml/rf_model.pkl"
 CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
 SCALER_PATH           = "ml/scaler.pkl"
@@ -103,8 +104,8 @@ def train_model():
     # calibrates its confidence scores on the held-out calibration slice.
     print("\nCalibrating confidence scores...")
     calibrated_model = CalibratedClassifierCV(
-        estimator=model, method="sigmoid", cv="prefit"
-    )
+    estimator=FrozenEstimator(model), method="sigmoid"
+)
     calibrated_model.fit(X_cal, y_cal)
 
     y_pred_cal = calibrated_model.predict(X_test)
