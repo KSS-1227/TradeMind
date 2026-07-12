@@ -46,21 +46,30 @@ def fetch_news_firecrawl(symbol: str) -> list:
         resp.raise_for_status()
         data = resp.json()
         results = data.get("data", []) or []
-        headlines = []
+        articles = []
         for r in results:
             title = r.get("title", "")
             desc  = r.get("description", "")
+            url   = r.get("url", "")
             if title:
-                headlines.append(f"{title}. {desc}".strip(". "))
-        print(f"Firecrawl: {len(headlines)} headlines for {symbol}")
-        return headlines
+                articles.append({
+                    "headline": f"{title}. {desc}".strip(". "),
+                    "url": url,
+                })
+        print(f"Firecrawl: {len(articles)} headlines for {symbol}")
+        return articles
     except Exception as e:
         print(f"Firecrawl news error for {symbol}: {e}")
         return []
 
 
 def fetch_news(symbol: str, days: int = 7) -> list:
-    headlines = []
+    """
+    Returns a list of dicts: [{"headline": str, "url": str}, ...]
+    (Previously returned plain strings — updated so downstream enrichment
+    can fetch full article text via the "url" field.)
+    """
+    articles = []
 
     # Method 1 — yfinance (fast, free, but flaky on cloud IPs)
     try:
@@ -71,18 +80,27 @@ def fetch_news(symbol: str, days: int = 7) -> list:
                 content = item.get("content", {})
                 title = content.get("title", "") or item.get("title", "")
                 summary = content.get("summary", "") or ""
+                url = (
+                    content.get("canonicalUrl", {}).get("url")
+                    or content.get("clickThroughUrl", {}).get("url")
+                    or item.get("link", "")
+                    or ""
+                )
                 if title:
-                    headlines.append(f"{title}. {summary}".strip(". "))
-            print(f"yfinance: {len(headlines)} headlines for {symbol}")
+                    articles.append({
+                        "headline": f"{title}. {summary}".strip(". "),
+                        "url": url,
+                    })
+            print(f"yfinance: {len(articles)} headlines for {symbol}")
     except Exception as e:
         print(f"yfinance news error for {symbol}: {e}")
 
     # Method 2 — Firecrawl (reliable fallback)
-    if not headlines:
-        headlines = fetch_news_firecrawl(symbol)
+    if not articles:
+        articles = fetch_news_firecrawl(symbol)
 
     # Method 3 — Google News RSS (last resort)
-    if not headlines:
+    if not articles:
         try:
             company = STOCK_NAMES.get(symbol, symbol.replace(".NS", ""))
             query = company.replace(" ", "+")
@@ -90,12 +108,15 @@ def fetch_news(symbol: str, days: int = 7) -> list:
             feed = feedparser.parse(url)
             for entry in feed.entries[:6]:
                 if entry.get("title"):
-                    headlines.append(entry.title)
-            print(f"RSS fallback: {len(headlines)} headlines for {symbol}")
+                    articles.append({
+                        "headline": entry.title,
+                        "url": entry.get("link", ""),
+                    })
+            print(f"RSS fallback: {len(articles)} headlines for {symbol}")
         except Exception as e:
             print(f"RSS fallback error: {e}")
 
-    return headlines
+    return articles
 
 
 def fetch_market_news(days: int = 3) -> list:

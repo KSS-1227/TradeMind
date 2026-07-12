@@ -10,12 +10,14 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 
 from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
 
-MODEL_PATH  = "ml/rf_model.pkl"
-SCALER_PATH = "ml/scaler.pkl"
+MODEL_PATH            = "ml/rf_model.pkl"
+CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
+SCALER_PATH           = "ml/scaler.pkl"
 
 FEATURES = [
     "RSI", "MACD", "MACD_signal", "MACD_hist",
@@ -70,9 +72,15 @@ def train_model():
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Train/test split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_scaled, y, test_size=0.2, random_state=42, shuffle=False
+    # Three-way split: train (60%) / calibration (20%) / test (20%).
+    # Calibration needs its own held-out slice — calibrating on the same
+    # data the model was trained on (or on the final test set) overstates
+    # how well-calibrated the confidence scores really are.
+    X_train, X_temp, y_train, y_temp = train_test_split(
+        X_scaled, y, test_size=0.4, random_state=42, shuffle=False
+    )
+    X_cal, X_test, y_cal, y_test = train_test_split(
+        X_temp, y_temp, test_size=0.5, random_state=42, shuffle=False
     )
 
     print("\nTraining Random Forest...")
@@ -85,31 +93,78 @@ def train_model():
     )
     model.fit(X_train, y_train)
 
-    # Evaluate
+    # Evaluate raw model
     y_pred = model.predict(X_test)
-    print("\nModel Performance:")
+    print("\nModel Performance (raw):")
     print(classification_report(y_test, y_pred,
           target_names=["SELL", "HOLD", "BUY"]))
 
-    # Save model and scaler
+    # Wrap with calibration — reuses the already-trained model above and
+    # calibrates its confidence scores on the held-out calibration slice.
+    print("\nCalibrating confidence scores...")
+    calibrated_model = CalibratedClassifierCV(
+        estimator=model, method="sigmoid", cv="prefit"
+    )
+    calibrated_model.fit(X_cal, y_cal)
+
+    y_pred_cal = calibrated_model.predict(X_test)
+    print("\nModel Performance (calibrated):")
+    print(classification_report(y_test, y_pred_cal,
+          target_names=["SELL", "HOLD", "BUY"]))
+
+    print_reliability_report(calibrated_model, X_test, y_test)
+
+    # Save raw model (used for feature-importance/SHAP), calibrated model
+    # (used for confidence scores), and the scaler
     joblib.dump(model, MODEL_PATH)
+    joblib.dump(calibrated_model, CALIBRATED_MODEL_PATH)
     joblib.dump(scaler, SCALER_PATH)
-    print(f"\nModel saved to {MODEL_PATH}")
+    print(f"\nRaw model saved to {MODEL_PATH}")
+    print(f"Calibrated model saved to {CALIBRATED_MODEL_PATH}")
     print(f"Scaler saved to {SCALER_PATH}")
 
-    return model, scaler
+    return model, calibrated_model, scaler
 
-def predict_signal(symbol: str, model=None, scaler=None) -> dict:
-    """Generate BUY/HOLD/SELL signal for a single stock"""
 
-    # Load model if not passed
-    if model is None:
-        if not os.path.exists(MODEL_PATH):
-            print("Model not found — training now...")
-            model, scaler = train_model()
+def print_reliability_report(calibrated_model, X_test, y_test):
+    """
+    For the BUY class (label=2): when the model says '70% confident',
+    was it actually right ~70% of the time? Bring this table to the
+    hackathon demo as evidence of calibration, not just accuracy.
+    """
+    probs_buy = calibrated_model.predict_proba(X_test)[:, 2]
+    y_buy = (y_test == 2).astype(int)
+
+    try:
+        fraction_correct, mean_predicted = calibration_curve(
+            y_buy, probs_buy, n_bins=10, strategy="quantile"
+        )
+        print("\nCalibration Reliability Report (BUY class)")
+        print("-" * 45)
+        print(f"{'Predicted conf.':>16} | {'Actual accuracy':>16}")
+        for pred, actual in zip(mean_predicted, fraction_correct):
+            print(f"{pred:>16.2f} | {actual:>16.2f}")
+        print("\nWell-calibrated = the two columns are close to equal.")
+    except Exception as e:
+        print(f"Reliability report skipped (not enough data for binning): {e}")
+
+def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) -> dict:
+    """
+    Generate BUY/HOLD/SELL signal for a single stock.
+    `model` (raw) is used for feature importances; `calibrated_model` is
+    used for the actual prediction and confidence score, since it's the
+    one with meaningful, calibrated probabilities.
+    """
+
+    # Load models if not passed
+    if model is None or calibrated_model is None:
+        if not os.path.exists(CALIBRATED_MODEL_PATH):
+            print("Calibrated model not found — training now...")
+            model, calibrated_model, scaler = train_model()
         else:
-            model  = joblib.load(MODEL_PATH)
-            scaler = joblib.load(SCALER_PATH)
+            model            = joblib.load(MODEL_PATH)
+            calibrated_model = joblib.load(CALIBRATED_MODEL_PATH)
+            scaler           = joblib.load(SCALER_PATH)
 
     # Fetch latest data
     df = fetch_prices(symbol, period="6mo")
@@ -123,9 +178,10 @@ def predict_signal(symbol: str, model=None, scaler=None) -> dict:
     X = pd.DataFrame([{f: latest.get(f, 0) for f in FEATURES}])
     X_scaled = scaler.transform(X.values)
 
-    # Predict
-    pred  = model.predict(X_scaled)[0]
-    proba = model.predict_proba(X_scaled)[0]
+    # Predict using the calibrated model — confidence here reflects
+    # real-world accuracy, not the raw (often overconfident) RF score
+    pred  = calibrated_model.predict(X_scaled)[0]
+    proba = calibrated_model.predict_proba(X_scaled)[0]
 
     label_map   = {0: "SELL", 1: "HOLD", 2: "BUY"}
     signal      = label_map[pred]
@@ -151,11 +207,11 @@ def predict_signal(symbol: str, model=None, scaler=None) -> dict:
 
 if __name__ == "__main__":
     # Train model
-    model, scaler = train_model()
+    model, calibrated_model, scaler = train_model()
 
     # Test prediction
     print("\nTesting prediction for RELIANCE.NS...")
-    result = predict_signal("RELIANCE.NS", model, scaler)
+    result = predict_signal("RELIANCE.NS", model, calibrated_model, scaler)
     print(f"\nSignal    : {result['signal']}")
     print(f"Confidence: {result['confidence']}")
     print(f"Price     : ₹{result['latest_price']}")

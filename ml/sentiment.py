@@ -1,6 +1,12 @@
 # ml/sentiment.py
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from transformers import pipeline
 import torch
+
+from data.news_enrichment import enrich_articles_for_stock, aggregate_sentiment_inputs
 
 # Load FinBERT once at module level (avoids reloading on every call)
 print("Loading FinBERT model...")
@@ -11,12 +17,15 @@ finbert = pipeline(
 )
 print("FinBERT ready.")
 
-def analyze_sentiment(headlines: list) -> dict:
+def analyze_sentiment(articles: list) -> dict:
     """
-    Analyze sentiment of news headlines using FinBERT
-    Returns dominant sentiment + scores
+    Analyze sentiment of news using FinBERT.
+    `articles` can be either:
+      - list[dict] with "headline"/"url" keys (current fetch_news.py format), or
+      - list[str] (legacy format, kept for backward compatibility)
+    Returns dominant sentiment + scores.
     """
-    if not headlines:
+    if not articles:
         return {
             "dominant": "neutral",
             "scores": {"positive": 0, "negative": 0, "neutral": 1},
@@ -24,8 +33,15 @@ def analyze_sentiment(headlines: list) -> dict:
             "summary": "No news available"
         }
 
-    # Limit to 5 headlines, truncate long ones
-    texts = [h[:512] for h in headlines[:5]]
+    # Normalize to plain text list — prefer enriched full text if present,
+    # otherwise fall back to headline (or the raw string, for legacy callers)
+    if isinstance(articles[0], dict):
+        texts_source = [a.get("sentiment_input") or a.get("headline", "") for a in articles]
+    else:
+        texts_source = articles
+
+    # Limit to 5 items, truncate long ones
+    texts = [t[:512] for t in texts_source[:5] if t]
 
     try:
         results = finbert(texts)
@@ -43,7 +59,7 @@ def analyze_sentiment(headlines: list) -> dict:
         confidence = round(scores[dominant], 3)
 
         # Plain English summary
-        summary = build_summary(dominant, confidence, len(headlines))
+        summary = build_summary(dominant, confidence, len(articles))
 
         return {
             "dominant": dominant,
@@ -71,14 +87,21 @@ def build_summary(dominant: str, confidence: float, num_headlines: int) -> str:
     else:
         return f"News sentiment is mixed — no strong directional signal from {num_headlines} articles"
 
-if __name__ == "__main__":
-    import sys
-    import os
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def get_enriched_sentiment(symbol: str) -> dict:
+    """
+    Full pipeline: fetch news -> enrich top articles with full text ->
+    score with FinBERT. Use this instead of calling fetch_news() +
+    analyze_sentiment() separately, since it wires in the enrichment step.
+    """
     from data.fetch_news import fetch_news
 
-    headlines = fetch_news("RELIANCE.NS")
-    result = analyze_sentiment(headlines)
+    articles = fetch_news(symbol)
+    enriched = enrich_articles_for_stock(articles)
+    return analyze_sentiment(enriched)
+
+
+if __name__ == "__main__":
+    result = get_enriched_sentiment("RELIANCE.NS")
 
     print(f"\nSentiment Result for Reliance:")
     print(f"  Dominant : {result['dominant'].upper()}")

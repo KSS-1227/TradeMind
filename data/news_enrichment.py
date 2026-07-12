@@ -12,16 +12,18 @@ Design goals:
 - Fail gracefully back to headline-only sentiment if scraping fails.
 """
 
+import os
 import time
 import hashlib
 import json
+import requests
 from pathlib import Path
 from typing import Optional
 
-# Assumes you already have a Firecrawl client set up elsewhere in your project,
-# e.g.: from firecrawl import FirecrawlApp; firecrawl_app = FirecrawlApp(api_key=...)
-# Pass that existing client into the functions below rather than creating a new one.
-
+# Uses the same FIRECRAWL_API_KEY / raw-requests pattern as data/fetch_news.py
+# (this repo doesn't use the Firecrawl Python SDK, just direct HTTP calls).
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY")
+FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 
 CACHE_DIR = Path("cache/news_articles")
 CACHE_TTL_SECONDS = 60 * 60 * 6  # 6 hours — news doesn't need minute-level freshness
@@ -51,19 +53,30 @@ def _write_cache(url: str, text: str) -> None:
     path.write_text(json.dumps({"url": url, "text": text, "cached_at": time.time()}))
 
 
-def get_full_article_text(firecrawl_app, article_url: str) -> str:
+def get_full_article_text(article_url: str) -> str:
     """
-    Returns full, cleaned article text for a given URL.
+    Returns full, cleaned article text for a given URL, via Firecrawl's
+    /v2/scrape endpoint (same auth/style as fetch_news_firecrawl).
     Falls back to empty string on any failure — caller should then
     fall back to headline-only sentiment rather than crash the pipeline.
     """
+    if not article_url or not FIRECRAWL_API_KEY:
+        return ""
+
     cached = _read_cache(article_url)
     if cached is not None:
         return cached
 
     try:
-        scraped = firecrawl_app.scrape_url(article_url, formats=["markdown"])
-        text = (scraped.get("markdown") or "")[:MAX_CHARS_PER_ARTICLE]
+        resp = requests.post(
+            FIRECRAWL_SCRAPE_URL,
+            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+            json={"url": article_url, "formats": ["markdown"]},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        text = (data.get("data", {}).get("markdown") or "")[:MAX_CHARS_PER_ARTICLE]
         if text.strip():
             _write_cache(article_url, text)
         return text
@@ -73,7 +86,6 @@ def get_full_article_text(firecrawl_app, article_url: str) -> str:
 
 
 def enrich_articles_for_stock(
-    firecrawl_app,
     articles: list[dict],
     max_articles: int = MAX_ARTICLES_PER_STOCK,
 ) -> list[dict]:
@@ -89,7 +101,7 @@ def enrich_articles_for_stock(
     enriched = []
     for i, article in enumerate(articles):
         if i < max_articles and article.get("url"):
-            full_text = get_full_article_text(firecrawl_app, article["url"])
+            full_text = get_full_article_text(article["url"])
             article["full_text"] = full_text if full_text else None
             article["sentiment_input"] = full_text or article.get("headline", "")
         else:

@@ -8,9 +8,11 @@ import pandas as pd
 import yfinance as yf
 
 from ml.sentiment import analyze_sentiment
+from data.news_enrichment import enrich_articles_for_stock
 
-MODEL_PATH  = "ml/rf_model.pkl"
-SCALER_PATH = "ml/scaler.pkl"
+MODEL_PATH            = "ml/rf_model.pkl"
+CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
+SCALER_PATH           = "ml/scaler.pkl"
 
 FEATURES = [
     "RSI", "MACD", "MACD_signal", "MACD_hist",
@@ -29,9 +31,16 @@ def generate_signal(research_data: dict) -> dict:
     latest  = research_data["latest"]
     df      = research_data["df"]
 
-    # Load model
-    model  = joblib.load(MODEL_PATH)
+    # Load model — prefer the calibrated model for well-calibrated confidence
+    # scores; fall back to the raw model if calibration hasn't been run yet
+    # (e.g. fresh clone before ml/rf_model.py's train_model() has been re-run).
     scaler = joblib.load(SCALER_PATH)
+    if os.path.exists(CALIBRATED_MODEL_PATH):
+        model = joblib.load(CALIBRATED_MODEL_PATH)
+    else:
+        print("[Signal Agent] Calibrated model not found — using raw model. "
+              "Run ml/rf_model.py's train_model() to generate it.")
+        model = joblib.load(MODEL_PATH)
 
     # Build feature vector
     X = np.array([[float(latest.get(f, 0)) for f in FEATURES]])
@@ -44,8 +53,9 @@ def generate_signal(research_data: dict) -> dict:
     rf_signal  = label_map[pred]
     rf_confidence = float(max(proba))
 
-    # Sentiment analysis
-    sentiment = analyze_sentiment(research_data["headlines"])
+    # Enrich top news articles with full text, then score sentiment
+    enriched_articles = enrich_articles_for_stock(research_data["headlines"])
+    sentiment = analyze_sentiment(enriched_articles)
 
     # Combine RF + sentiment into final signal
     final_signal, final_confidence = combine_signals(
