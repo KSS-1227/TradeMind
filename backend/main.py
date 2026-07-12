@@ -157,7 +157,7 @@ def get_backtest(symbol: str):
     if not symbol.endswith(".NS"):
         symbol = symbol + ".NS"
     try:
-        result = run_backtest(symbol.upper(), period="2y")
+        result = run_backtest(symbol.upper(), period="5y")
         if "error" in result:
             raise HTTPException(status_code=404, detail=result["error"])
         return result
