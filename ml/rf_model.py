@@ -11,11 +11,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
+from sklearn.frozen import FrozenEstimator
 
 from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
-from sklearn.calibration import CalibratedClassifierCV, calibration_curve
-from sklearn.frozen import FrozenEstimator
+
 MODEL_PATH            = "ml/rf_model.pkl"
 CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
 SCALER_PATH           = "ml/scaler.pkl"
@@ -61,28 +61,86 @@ def build_training_data() -> pd.DataFrame:
     print(f"\nTotal training rows: {len(combined)}")
     return combined
 
-def train_model():
-    """Train and save the Random Forest model"""
+def time_split_by_symbol(df: pd.DataFrame, test_size: float = 0.4,
+                          cal_ratio: float = 0.5):
+    """
+    Split chronologically WITHIN each symbol, then recombine across symbols —
+    instead of one sequential split over the whole concatenated multi-symbol
+    frame (which can silently dump entire symbols into the test set if the
+    frame is built stock-by-stock, as build_training_data() does).
+
+    Assumes each symbol's rows are already in chronological order (true here
+    since fetch_prices() preserves date order and build_training_data() just
+    concatenates per-symbol frames without reordering).
+
+    Returns (train_df, cal_df, test_df), each containing a proportional,
+    time-ordered slice of every symbol.
+    """
+    train_parts, temp_parts = [], []
+    for _, group in df.groupby("symbol", sort=False):
+        n = len(group)
+        split_idx = int(n * (1 - test_size))
+        train_parts.append(group.iloc[:split_idx])
+        temp_parts.append(group.iloc[split_idx:])
+    train_df = pd.concat(train_parts, ignore_index=True)
+    temp_df  = pd.concat(temp_parts, ignore_index=True)
+
+    cal_parts, test_parts = [], []
+    for _, group in temp_df.groupby("symbol", sort=False):
+        n = len(group)
+        split_idx = int(n * cal_ratio)
+        cal_parts.append(group.iloc[:split_idx])
+        test_parts.append(group.iloc[split_idx:])
+    cal_df  = pd.concat(cal_parts, ignore_index=True)
+    test_df = pd.concat(test_parts, ignore_index=True)
+
+    return train_df, cal_df, test_df
+
+
+def train_model(calibration: str = "prefit"):
+    """
+    Train and save the Random Forest model.
+
+    calibration:
+      "prefit" — current approach. Train RF once on X_train, calibrate on a
+                 separate held-out X_cal slice via FrozenEstimator. Cheap,
+                 but calibrators only see one (smaller) slice of data.
+      "cv5"    — cross-validated calibration. Fits 5 internal RF/calibrator
+                 pairs on rotating folds of (X_train + X_cal combined), then
+                 averages them. Uses more data per calibrator at the cost of
+                 5x the training time. Typically more stable when the
+                 calibration slice is small.
+    """
     print("Building training data...")
     df = build_training_data()
 
-    X = df[FEATURES].values
-    y = df["label"].values
+    # Split chronologically WITHIN each symbol, then recombine — NOT a
+    # single sequential split across the concatenated multi-symbol blob.
+    # Concatenated order is stock-by-stock (see STOCKS list), so a naive
+    # train_test_split(shuffle=False) on the combined frame put entire
+    # symbols (the last 3 — GOLDBEES/SILVERBEES/NIFTYBEES, all ETFs with
+    # much lower volatility than the individual stocks) almost exclusively
+    # into the test set. The model trained on stocks and got evaluated on
+    # ETFs it barely saw, which collapses accuracy toward "always predict
+    # the majority class."
+    train_df, cal_df, test_df = time_split_by_symbol(
+        df, test_size=0.4, cal_ratio=0.5
+    )
+    print(f"Train rows: {len(train_df)} | Cal rows: {len(cal_df)} | "
+          f"Test rows: {len(test_df)}")
+    for name, part in [("Train", train_df), ("Cal", cal_df), ("Test", test_df)]:
+        print(f"  {name} symbol counts:\n"
+              f"{part['symbol'].value_counts().to_string()}")
 
-    # Scale features
+    # Fit the scaler on the TRAIN fold only — fitting it on the full
+    # dataset (including cal/test) leaks their distribution into training.
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    # Three-way split: train (60%) / calibration (20%) / test (20%).
-    # Calibration needs its own held-out slice — calibrating on the same
-    # data the model was trained on (or on the final test set) overstates
-    # how well-calibrated the confidence scores really are.
-    X_train, X_temp, y_train, y_temp = train_test_split(
-        X_scaled, y, test_size=0.4, random_state=42, shuffle=False
-    )
-    X_cal, X_test, y_cal, y_test = train_test_split(
-        X_temp, y_temp, test_size=0.5, random_state=42, shuffle=False
-    )
+    X_train = scaler.fit_transform(train_df[FEATURES].values)
+    X_cal   = scaler.transform(cal_df[FEATURES].values)
+    X_test  = scaler.transform(test_df[FEATURES].values)
+    y_train = train_df["label"].values
+    y_cal   = cal_df["label"].values
+    y_test  = test_df["label"].values
 
     print("\nTraining Random Forest...")
     model = RandomForestClassifier(
@@ -100,20 +158,40 @@ def train_model():
     print(classification_report(y_test, y_pred,
           target_names=["SELL", "HOLD", "BUY"]))
 
-    # Wrap with calibration — reuses the already-trained model above and
-    # calibrates its confidence scores on the held-out calibration slice.
-    print("\nCalibrating confidence scores...")
-    calibrated_model = CalibratedClassifierCV(
-    estimator=FrozenEstimator(model), method="sigmoid"
-)
-    calibrated_model.fit(X_cal, y_cal)
+    print(f"\nCalibrating confidence scores (method='{calibration}')...")
+    if calibration == "cv5":
+        # cv=5 needs an *unfitted* estimator — it clones and refits internally
+        # on each fold. Give it train+cal combined so calibrators see more data.
+        X_cal_fit = np.concatenate([X_train, X_cal])
+        y_cal_fit = np.concatenate([y_train, y_cal])
+        fresh_rf = RandomForestClassifier(
+            n_estimators=200, max_depth=10, random_state=42,
+            class_weight="balanced", n_jobs=-1
+        )
+        calibrated_model = CalibratedClassifierCV(
+            estimator=fresh_rf, method="sigmoid", cv=5
+        )
+        calibrated_model.fit(X_cal_fit, y_cal_fit)
+    elif calibration == "prefit":
+        # Reuses the already-trained model above and calibrates its
+        # confidence scores on the held-out calibration slice only.
+        calibrated_model = CalibratedClassifierCV(
+            estimator=FrozenEstimator(model), method="sigmoid"
+        )
+        calibrated_model.fit(X_cal, y_cal)
+    else:
+        raise ValueError(f"Unknown calibration method: {calibration!r} "
+                          "(expected 'prefit' or 'cv5')")
 
     y_pred_cal = calibrated_model.predict(X_test)
     print("\nModel Performance (calibrated):")
     print(classification_report(y_test, y_pred_cal,
           target_names=["SELL", "HOLD", "BUY"]))
 
-    print_reliability_report(calibrated_model, X_test, y_test)
+    print_reliability_report(model, X_test, y_test, label="Raw RF")
+    print_reliability_report(calibrated_model, X_test, y_test,
+                              label=f"Calibrated ({calibration})")
+    print_reliability_comparison(model, calibrated_model, X_test, y_test)
 
     # Save raw model (used for feature-importance/SHAP), calibrated model
     # (used for confidence scores), and the scaler
@@ -127,27 +205,72 @@ def train_model():
     return model, calibrated_model, scaler
 
 
-def print_reliability_report(calibrated_model, X_test, y_test):
+def reliability_bins(model, X_test, y_test, n_bins: int = 10):
+    """
+    Returns (mean_predicted, fraction_correct) arrays for the BUY class
+    (label=2) so different models' calibration can be compared directly.
+    Returns (None, None) if there isn't enough data to bin.
+    """
+    probs_buy = model.predict_proba(X_test)[:, 2]
+    y_buy = (y_test == 2).astype(int)
+    try:
+        fraction_correct, mean_predicted = calibration_curve(
+            y_buy, probs_buy, n_bins=n_bins, strategy="quantile"
+        )
+        return mean_predicted, fraction_correct
+    except Exception as e:
+        print(f"Reliability bins skipped (not enough data for binning): {e}")
+        return None, None
+
+
+def print_reliability_report(model, X_test, y_test, label: str = "Calibrated"):
     """
     For the BUY class (label=2): when the model says '70% confident',
     was it actually right ~70% of the time? Bring this table to the
     hackathon demo as evidence of calibration, not just accuracy.
     """
-    probs_buy = calibrated_model.predict_proba(X_test)[:, 2]
-    y_buy = (y_test == 2).astype(int)
+    mean_predicted, fraction_correct = reliability_bins(model, X_test, y_test)
+    if mean_predicted is None:
+        return
 
-    try:
-        fraction_correct, mean_predicted = calibration_curve(
-            y_buy, probs_buy, n_bins=10, strategy="quantile"
-        )
-        print("\nCalibration Reliability Report (BUY class)")
-        print("-" * 45)
-        print(f"{'Predicted conf.':>16} | {'Actual accuracy':>16}")
-        for pred, actual in zip(mean_predicted, fraction_correct):
-            print(f"{pred:>16.2f} | {actual:>16.2f}")
-        print("\nWell-calibrated = the two columns are close to equal.")
-    except Exception as e:
-        print(f"Reliability report skipped (not enough data for binning): {e}")
+    print(f"\nCalibration Reliability Report — {label} (BUY class)")
+    print("-" * 45)
+    print(f"{'Predicted conf.':>16} | {'Actual accuracy':>16}")
+    for pred, actual in zip(mean_predicted, fraction_correct):
+        print(f"{pred:>16.2f} | {actual:>16.2f}")
+    print("\nWell-calibrated = the two columns are close to equal.")
+
+
+def print_reliability_comparison(raw_model, calibrated_model, X_test, y_test):
+    """
+    Side-by-side reliability table: raw RF vs. calibrated model, bin by bin,
+    on the same held-out test set. Use this to see whether calibration is
+    actually correcting overconfidence or just compressing an already-weak
+    signal toward 50%.
+    """
+    raw_pred, raw_actual = reliability_bins(raw_model, X_test, y_test)
+    cal_pred, cal_actual = reliability_bins(calibrated_model, X_test, y_test)
+
+    if raw_pred is None or cal_pred is None:
+        print("Comparison skipped — not enough data for binning.")
+        return
+
+    print("\nReliability Comparison — Raw vs. Calibrated (BUY class)")
+    print("-" * 72)
+    print(f"{'Raw pred.':>10} | {'Raw actual':>10} || "
+          f"{'Cal pred.':>10} | {'Cal actual':>10} | {'Bin':>4}")
+    n = min(len(raw_pred), len(cal_pred))
+    for i in range(n):
+        print(f"{raw_pred[i]:>10.2f} | {raw_actual[i]:>10.2f} || "
+              f"{cal_pred[i]:>10.2f} | {cal_actual[i]:>10.2f} | {i+1:>4}")
+
+    raw_gap = np.mean(np.abs(np.array(raw_pred) - np.array(raw_actual)))
+    cal_gap = np.mean(np.abs(np.array(cal_pred) - np.array(cal_actual)))
+    print(f"\nMean |predicted - actual| gap — raw: {raw_gap:.3f}  "
+          f"calibrated: {cal_gap:.3f}")
+    print("Smaller gap = better calibrated. If the calibrated gap isn't "
+          "meaningfully smaller than the raw gap, calibration isn't the "
+          "fix you need — the underlying signal is the bottleneck.")
 
 def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) -> dict:
     """
@@ -207,8 +330,29 @@ def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) 
     }
 
 if __name__ == "__main__":
-    # Train model
-    model, calibrated_model, scaler = train_model()
+    # Usage:
+    #   python ml/rf_model.py             -> current default (prefit)
+    #   python ml/rf_model.py cv5         -> cross-validated calibration
+    #   python ml/rf_model.py both        -> train both, compare reliability tables
+    method = sys.argv[1] if len(sys.argv) > 1 else "prefit"
+
+    if method == "both":
+        print("=" * 30, " PREFIT ", "=" * 30)
+        _, calibrated_prefit, _ = train_model(calibration="prefit")
+        print("\n" + "=" * 30, " CV=5 ", "=" * 30)
+        model, calibrated_cv5, scaler = train_model(calibration="cv5")
+
+        # Reuse the same test split train_model() built internally is not
+        # exposed here, so this comparison only holds if you re-run
+        # print_reliability_comparison from inside train_model (already
+        # printed above for each). This final block just confirms both
+        # models saved correctly.
+        print("\nBoth calibration methods trained. Compare the two "
+              "'Calibration Reliability Report' tables printed above "
+              "to see which is closer to the diagonal (predicted ≈ actual).")
+        calibrated_model = calibrated_cv5
+    else:
+        model, calibrated_model, scaler = train_model(calibration=method)
 
     # Test prediction
     print("\nTesting prediction for RELIANCE.NS...")
