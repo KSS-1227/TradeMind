@@ -4,6 +4,7 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, AreaChart, Area, PieChart, Pie, Cell
 } from "recharts";
+import ScreenerPage from "./ScreenerPage";
 
 const API = "https://kss-1227-trademind.hf.space";
 
@@ -37,6 +38,7 @@ const NAV = [
   { id:"portfolio",   icon:"📁", label:"Portfolio" },
   { id:"backtest",    icon:"📈", label:"Backtest" },
   { id:"commodities", icon:"🥇", label:"Commodities" },
+  { id:"screener",    icon:"💬", label:"Screener" },
 ];
 
 // ── Custom hook for screen size ──────────────────────────
@@ -921,6 +923,7 @@ export default function App() {
     portfolio:   <PortfolioPage isMobile={isMobile}/>,
     backtest:    <BacktestPage isMobile={isMobile}/>,
     commodities: <CommoditiesPage isMobile={isMobile}/>,
+    screener:    <ScreenerPage isMobile={isMobile}/>,
   };
 
   const sidebarW = isMobile ? 0 : 60;

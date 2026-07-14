@@ -5,7 +5,9 @@ from datetime import datetime
 import os
 import requests
 
-# Curated NSE stocks + ETFs for TradeMind
+# Curated NSE stocks + ETFs for TradeMind's ML MODEL. Kept intentionally
+# small — this is the universe the RF/XGBoost model was trained and
+# labeled on. Don't add to this list without retraining.
 STOCKS = [
     # NSE Stocks
     "RELIANCE.NS", "TCS.NS", "INFY.NS",
@@ -16,6 +18,21 @@ STOCKS = [
     "SILVERBEES.NS",  # Nippon India Silver ETF
     # Popular Index ETFs
     "NIFTYBEES.NS",   # Nifty50 ETF
+]
+
+# Broader universe for the NL SCREENER only. Unlike the ML model, the
+# screener has no training/label dependency — it's pure rule evaluation
+# against live indicators, so nothing stops it covering far more symbols
+# than STOCKS. Includes STOCKS plus other liquid NSE large-caps.
+SCREENER_UNIVERSE = STOCKS + [
+    "LT.NS", "HINDUNILVR.NS", "AXISBANK.NS", "KOTAKBANK.NS", "MARUTI.NS",
+    "SUNPHARMA.NS", "TITAN.NS", "ASIANPAINT.NS", "BHARTIARTL.NS",
+    "TMPV.NS",  # was TATAMOTORS.NS — renamed after Oct 2025 CV/PV demerger
+    "TATASTEEL.NS", "ULTRACEMCO.NS", "NESTLEIND.NS",
+    "POWERGRID.NS", "NTPC.NS", "ONGC.NS", "COALINDIA.NS", "HCLTECH.NS",
+    "TECHM.NS", "DRREDDY.NS", "CIPLA.NS", "DIVISLAB.NS", "GRASIM.NS",
+    "JSWSTEEL.NS", "HINDALCO.NS", "BPCL.NS", "EICHERMOT.NS",
+    "HEROMOTOCO.NS", "BAJAJFINSV.NS", "INDUSINDBK.NS",
 ]
 
 def fetch_prices(symbol: str, period: str = "1y") -> pd.DataFrame:
@@ -44,6 +61,55 @@ def fetch_prices(symbol: str, period: str = "1y") -> pd.DataFrame:
     except Exception as e:
         print(f"Error fetching {symbol}: {e}")
         return pd.DataFrame()
+
+def fetch_prices_batch(symbols: list, period: str = "6mo") -> dict:
+    """
+    Fetch OHLCV for multiple symbols in ONE yfinance call instead of N
+    sequential ones. Matters once the universe is bigger than a handful of
+    symbols (see SCREENER_UNIVERSE) — sequential fetch_prices() calls in a
+    loop would make a live screener query noticeably slow.
+
+    Returns {symbol: DataFrame}. Falls back to per-symbol fetch_prices()
+    for the whole batch if the batch call itself fails, and for any
+    individual symbol yfinance's batch response is missing/malformed for
+    (batch calls can silently drop a problem ticker rather than raising).
+    """
+    if not symbols:
+        return {}
+    try:
+        raw = yf.download(tickers=symbols, period=period, interval="1d",
+                           group_by="ticker", progress=False, threads=True)
+    except Exception as e:
+        print(f"Batch fetch failed ({e}) — falling back to per-symbol fetch")
+        return {s: fetch_prices(s, period) for s in symbols}
+
+    results = {}
+    for symbol in symbols:
+        try:
+            # yfinance returns a flat (non-MultiIndex) frame when only one
+            # symbol was requested, and a MultiIndex (symbol, field) frame
+            # for multiple — handle both shapes.
+            df = raw.copy() if len(symbols) == 1 else raw[symbol].copy()
+            df = df.dropna(how="all")
+            if df.empty:
+                results[symbol] = fetch_prices(symbol, period)
+                continue
+
+            df["symbol"] = symbol
+            df.reset_index(inplace=True)
+
+            if "Close" in df.columns:
+                df["pct_change"] = df["Close"].pct_change().abs()
+                df = df[df["pct_change"] < 0.20]
+                df = df.drop(columns=["pct_change"])
+                df.reset_index(drop=True, inplace=True)
+
+            print(f"Fetched {len(df)} rows for {symbol} (batch)")
+            results[symbol] = df
+        except Exception as e:
+            print(f"Batch fetch missing {symbol} ({e}) — fetching individually")
+            results[symbol] = fetch_prices(symbol, period)
+    return results
 
 def fetch_all_stocks(period: str = "1y") -> pd.DataFrame:
     """Fetch data for all stocks and combine"""

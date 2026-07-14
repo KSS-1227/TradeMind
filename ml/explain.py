@@ -7,17 +7,17 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from data.fetch_prices import fetch_prices
+from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
+from ml.market_relative import compute_live_relative_features, MARKET_RELATIVE_FEATURES
+from ml.rf_model import FEATURES  # single source of truth — see the same
+                                   # note in agents/signal_agent.py. This
+                                   # file previously had its own stale
+                                   # 12-feature copy, causing a feature-count
+                                   # mismatch at scaler.transform() time.
 
 MODEL_PATH  = "ml/rf_model.pkl"
 SCALER_PATH = "ml/scaler.pkl"
-
-FEATURES = [
-    "RSI", "MACD", "MACD_signal", "MACD_hist",
-    "BB_upper", "BB_lower", "EMA_20", "EMA_50",
-    "Volume_MA20", "Returns", "Returns_5d", "Volume"
-]
 
 # Plain English templates for each feature
 EXPLANATIONS = {
@@ -59,6 +59,43 @@ EXPLANATIONS = {
         f"5-day return: {round(v*100, 2)}% — short-term downtrend"
     ),
     "Volume": lambda v: f"Current volume: {int(v):,} shares traded",
+    # Market-relative / cross-sectional — added alongside the FEATURES fix.
+    # Without these, a market-relative feature ranking in the SHAP top-3
+    # would silently produce fewer than 3 reasons instead of an error —
+    # not a crash, but a quiet quality gap against this project's own
+    # "every signal fully explained" standard.
+    "Rel_Return": lambda v: (
+        f"Outperforming Nifty by {round(v*100, 2)}% today ↑"
+        if v > 0 else
+        f"Underperforming Nifty by {round(abs(v)*100, 2)}% today ↓"
+    ),
+    "Rel_Return_5d": lambda v: (
+        f"Outperforming Nifty by {round(v*100, 2)}% over 5 days ↑"
+        if v > 0 else
+        f"Underperforming Nifty by {round(abs(v)*100, 2)}% over 5 days ↓"
+    ),
+    "Beta_20d": lambda v: (
+        f"Beta {round(v, 2)} — amplifying market moves more than usual"
+        if v > 1.2 else
+        f"Beta {round(v, 2)} — moving roughly in line with the market"
+        if v > 0.8 else
+        f"Beta {round(v, 2)} — dampening market moves, more defensive"
+    ),
+    "RS_line_ROC_10": lambda v: (
+        f"Relative strength vs. Nifty rising ({round(v*100, 2)}% over 10 days) ↑"
+        if v > 0 else
+        f"Relative strength vs. Nifty falling ({round(v*100, 2)}% over 10 days) ↓"
+    ),
+    "RSI_rel_class": lambda v: (
+        f"RSI {round(v, 1)} points above its peer group average"
+        if v > 0 else
+        f"RSI {round(abs(v), 1)} points below its peer group average"
+    ),
+    "Returns_rel_class": lambda v: (
+        f"Outperforming peer stocks by {round(v*100, 2)}% today ↑"
+        if v > 0 else
+        f"Underperforming peer stocks by {round(abs(v)*100, 2)}% today ↓"
+    ),
 }
 
 def explain_signal(symbol: str, signal: str) -> dict:
@@ -72,7 +109,19 @@ def explain_signal(symbol: str, signal: str) -> dict:
     # Get latest data
     df = fetch_prices(symbol, period="1y")
     df = add_technical_indicators(df)
-    latest = df.iloc[-1]
+    latest = df.iloc[-1].to_dict()
+
+    # Market-relative / cross-sectional features — same computation used in
+    # agents/research_agent.py and ml/rf_model.py's predict_signal(), needed
+    # here too since this function does its own independent data fetch
+    # rather than reusing research_agent's result.
+    try:
+        relative_feats = compute_live_relative_features(symbol, df, STOCKS, period="1y")
+        latest.update(relative_feats)
+    except Exception as e:
+        print(f"[Explain] Market-relative features failed ({e}) — "
+              f"falling back to 0 for those fields.")
+        latest.update({f: 0.0 for f in MARKET_RELATIVE_FEATURES})
 
     # Build feature vector
     feature_values = {f: float(latest.get(f, 0)) for f in FEATURES}

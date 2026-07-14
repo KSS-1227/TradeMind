@@ -9,8 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from agents.pipeline import run_pipeline
-from data.fetch_prices import STOCKS, fetch_prices
+from data.fetch_prices import STOCKS, SCREENER_UNIVERSE, fetch_prices
 from ml.backtest import run_backtest
+from ml.screener import screen_stocks
+from notifications.whatsapp import send_whatsapp_message, format_signal_alert
+from notifications.subscriptions import (
+    add_subscription, remove_subscription, list_subscriptions,
+    symbols_with_subscribers,
+)
+from pydantic import BaseModel
 # Ensure model exists on startup
 from startup import ensure_model_exists
 ensure_model_exists()
@@ -54,6 +61,111 @@ def list_stocks():
     """Return list of supported NSE stocks"""
     stocks = [s.replace(".NS", "") for s in STOCKS]
     return {"stocks": stocks, "count": len(stocks)}
+
+class ScreenerRequest(BaseModel):
+    query: str
+
+@app.post("/screener")
+def run_screener(request: ScreenerRequest):
+    """
+    Natural-Language Screener Builder. Deterministic parsing — no LLM
+    call — so results are reproducible and every match comes with an
+    explicit per-condition breakdown, and any part of the query that
+    couldn't be understood is surfaced rather than silently dropped.
+
+    Example body: {"query": "RSI below 30 and price above 50 day EMA"}
+    """
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty")
+    try:
+        result = screen_stocks(request.query, universe=SCREENER_UNIVERSE)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class WhatsAppSubscribeRequest(BaseModel):
+    phone: str    # E.164 format, e.g. "+919876543210"
+    symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
+
+@app.post("/whatsapp/subscribe")
+def whatsapp_subscribe(request: WhatsAppSubscribeRequest):
+    """
+    Subscribe a phone number to WhatsApp alerts for a stock. Sends an
+    immediate confirmation message so the user gets instant feedback that
+    the number actually works (this also surfaces Twilio sandbox
+    join-code issues right away instead of silently at alert time).
+
+    NOTE: recipients must have joined your Twilio WhatsApp sandbox first
+    (see notifications/whatsapp.py) — this is a Twilio sandbox
+    requirement, not something this endpoint can bypass.
+    """
+    result = add_subscription(request.phone, request.symbol)
+    if result["added"]:
+        confirm = send_whatsapp_message(
+            request.phone,
+            f"You're subscribed to TradeMind alerts for {request.symbol.upper()}. "
+            f"You'll get a WhatsApp message when the signal changes to BUY or SELL."
+        )
+        result["confirmation_sent"] = confirm["success"]
+        if not confirm["success"]:
+            result["confirmation_error"] = confirm["error"]
+    return result
+
+@app.post("/whatsapp/unsubscribe")
+def whatsapp_unsubscribe(request: WhatsAppSubscribeRequest):
+    return remove_subscription(request.phone, request.symbol)
+
+@app.get("/whatsapp/subscriptions")
+def whatsapp_list_subscriptions(symbol: str = None):
+    """Debug/admin view of current subscriptions. Not phone-number-scoped
+    auth — fine for a hackathon demo, but don't ship this route as-is to
+    a real product without adding access control."""
+    return {"subscriptions": list_subscriptions(symbol)}
+
+@app.post("/whatsapp/check-alerts")
+def whatsapp_check_alerts():
+    """
+    Evaluate the current signal for every symbol that has at least one
+    subscriber, and WhatsApp anyone subscribed to a symbol whose signal
+    is currently BUY or SELL (HOLD is deliberately not alerted — that's
+    the "nothing changed" case, and alerting on it would just be noise).
+
+    For a demo: call this manually via a button/curl. For production:
+    wire this to a scheduled job (cron, or a simple `while True: sleep`
+    loop in a separate process) running every N minutes during market
+    hours — this endpoint itself doesn't loop or schedule anything, it
+    just runs one evaluation pass when called.
+    """
+    symbols = symbols_with_subscribers()
+    sent, skipped, errors = [], [], []
+
+    for symbol in symbols:
+        real_ticker = SYMBOL_MAP.get(symbol, symbol)
+        try:
+            signal_data = run_pipeline(real_ticker)
+        except Exception as e:
+            errors.append({"symbol": symbol, "error": str(e)})
+            continue
+        if "error" in signal_data:
+            errors.append({"symbol": symbol, "error": signal_data["error"]})
+            continue
+
+        signal_data["symbol"] = symbol.replace(".NS", "")
+        if signal_data.get("signal") == "HOLD":
+            skipped.append(symbol)
+            continue
+
+        message = format_signal_alert(signal_data)
+        for sub in list_subscriptions(symbol):
+            result = send_whatsapp_message(sub["phone"], message)
+            entry = {"phone": sub["phone"], "symbol": symbol,
+                      "signal": signal_data["signal"], "success": result["success"]}
+            if not result["success"]:
+                entry["error"] = result["error"]
+            sent.append(entry)
+
+    return {"symbols_checked": symbols, "alerts_sent": sent,
+            "skipped_hold": skipped, "errors": errors}
 
 @app.get("/signal/{symbol}")
 def get_signal(symbol: str):

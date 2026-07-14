@@ -9,16 +9,16 @@ import yfinance as yf
 
 from ml.sentiment import analyze_sentiment
 from data.news_enrichment import enrich_articles_for_stock
+from ml.rf_model import FEATURES  # single source of truth — do NOT redefine
+                                   # this list here again. It previously was
+                                   # duplicated in this file and silently fell
+                                   # out of sync when market-relative features
+                                   # were added to ml/rf_model.py, causing a
+                                   # feature-count mismatch at prediction time.
 
 MODEL_PATH            = "ml/rf_model.pkl"
 CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
 SCALER_PATH           = "ml/scaler.pkl"
-
-FEATURES = [
-    "RSI", "MACD", "MACD_signal", "MACD_hist",
-    "BB_upper", "BB_lower", "EMA_20", "EMA_50",
-    "Volume_MA20", "Returns", "Returns_5d", "Volume"
-]
 
 def generate_signal(research_data: dict) -> dict:
     """

@@ -8,17 +8,50 @@ import numpy as np
 import joblib
 from datetime import datetime
 
-from data.fetch_prices import fetch_prices
+from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
+from ml.market_relative import fetch_nifty_benchmark, add_market_relative_features
+from ml.rf_model import FEATURES  # single source of truth — see the same
+                                   # note in agents/signal_agent.py and
+                                   # ml/explain.py. This file's own stale
+                                   # 12-feature copy was silently caught by
+                                   # the bare `except: label = "HOLD"` below,
+                                   # so every backtest run after
+                                   # market-relative features were added to
+                                   # the model produced a fake "never trade"
+                                   # result with NO visible error.
 
 MODEL_PATH  = "ml/rf_model.pkl"
 SCALER_PATH = "ml/scaler.pkl"
 
-FEATURES = [
-    "RSI", "MACD", "MACD_signal", "MACD_hist",
-    "BB_upper", "BB_lower", "EMA_20", "EMA_50",
-    "Volume_MA20", "Returns", "Returns_5d", "Volume"
-]
+
+def _build_relative_features_for_symbol(symbol: str, period: str) -> pd.DataFrame:
+    """
+    Market-relative/cross-sectional features need the full peer universe
+    aligned by date (see ml/market_relative.py) — they can't be computed
+    from one symbol's history in isolation. Fetches all of STOCKS (the
+    model's training universe — same reasoning as agents/research_agent.py
+    for why STOCKS and not the larger screener universe) + Nifty for the
+    given period, computes the features across all of them, then returns
+    just `symbol`'s enriched rows for the rest of the backtest to use.
+    """
+    universe = STOCKS if symbol in STOCKS else STOCKS + [symbol]
+
+    all_data = []
+    for s in universe:
+        df = fetch_prices(s, period=period)
+        if df.empty:
+            continue
+        df = add_technical_indicators(df)
+        all_data.append(df)
+    combined = pd.concat(all_data, ignore_index=True)
+
+    nifty_df = fetch_nifty_benchmark(period=period)
+    combined = add_market_relative_features(combined, nifty_df)
+
+    result = combined[combined["symbol"] == symbol].sort_values("Date").reset_index(drop=True)
+    return result
+
 
 # ── 1. Generate signals for entire history ─────────────────
 def generate_historical_signals(symbol: str, period: str = "2y") -> pd.DataFrame:
@@ -26,10 +59,13 @@ def generate_historical_signals(symbol: str, period: str = "2y") -> pd.DataFrame
     model  = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
 
-    df = fetch_prices(symbol, period=period)
-    df = add_technical_indicators(df)
+    df = _build_relative_features_for_symbol(symbol, period)
+    if df.empty:
+        return df
 
     signals = []
+    fallback_count = 0
+    fallback_example = None
     for i in range(len(df)):
         row = df.iloc[i]
         try:
@@ -37,9 +73,29 @@ def generate_historical_signals(symbol: str, period: str = "2y") -> pd.DataFrame
             X_scaled = scaler.transform(X)
             pred  = model.predict(X_scaled)[0]
             label = {0: "SELL", 1: "HOLD", 2: "BUY"}[pred]
-        except:
+        except Exception as e:
             label = "HOLD"
+            fallback_count += 1
+            if fallback_example is None:
+                fallback_example = str(e)
         signals.append(label)
+
+    # A handful of fallbacks is expected (e.g. the first ~20 rows before
+    # Beta_20d's rolling window has enough history — see ml/rf_model.py's
+    # create_labels() dropna). A LARGE fraction falling back is not normal
+    # warmup — it's the same class of silent bug this fix addresses, so
+    # it's surfaced loudly here instead of being swallowed again.
+    fallback_pct = fallback_count / len(df) if len(df) else 0
+    if fallback_pct > 0.10:
+        print(f"[Backtest] WARNING: {fallback_count}/{len(df)} rows "
+              f"({fallback_pct:.0%}) fell back to HOLD due to prediction "
+              f"errors — this is far more than expected warmup NaN loss. "
+              f"First error: {fallback_example}. Backtest results below "
+              f"are likely NOT meaningful until this is investigated.")
+    elif fallback_count > 0:
+        print(f"[Backtest] {fallback_count}/{len(df)} rows fell back to "
+              f"HOLD (expected warmup rows, e.g. before rolling features "
+              f"like Beta_20d have enough history).")
 
     df["signal"] = signals
     return df
