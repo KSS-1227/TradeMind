@@ -70,6 +70,55 @@ def create_labels(df: pd.DataFrame, horizon: int = 5,
     df.dropna(inplace=True)
     return df
 
+
+def create_labels_vol_normalized(df: pd.DataFrame, horizon: int = 5,
+                                  vol_window: int = 20, k: float = 1.0) -> pd.DataFrame:
+    """
+    Label BUY/SELL relative to the stock's OWN recent volatility, instead
+    of a flat percentage threshold applied identically to every stock.
+
+    The problem this fixes: a ±2% move means something very different for
+    a low-volatility ETF (GOLDBEES) than a high-volatility name
+    (ADANIENT). create_labels()'s flat threshold treats both the same,
+    which either mislabels genuine moves in calm stocks as noise, or
+    labels ordinary noise in volatile stocks as a real signal — same
+    threshold, very different statistical significance.
+
+    BUY  = future_return > +k * horizon_vol
+    SELL = future_return < -k * horizon_vol
+    HOLD = everything else
+
+    horizon_vol = rolling `vol_window`-day daily-return std, scaled to
+    the `horizon`-day window via sqrt(horizon) — the standard scaling
+    for i.i.d. returns over multiple days. k=1.0 means "moved more than
+    one recent-volatility unit in `horizon` days" — a statistically
+    comparable bar across every stock, unlike a fixed percentage.
+    """
+    df = df.copy()
+    df["future_return"] = df["Close"].shift(-horizon) / df["Close"] - 1
+
+    daily_returns = df["Close"].pct_change()
+    daily_vol = daily_returns.rolling(vol_window).std()
+    df["_horizon_vol"] = daily_vol * np.sqrt(horizon)
+
+    def label(row):
+        fr, vol = row["future_return"], row["_horizon_vol"]
+        if pd.isna(fr) or pd.isna(vol) or vol == 0:
+            return np.nan
+        if fr > k * vol:
+            return 2   # BUY
+        elif fr < -k * vol:
+            return 0   # SELL
+        else:
+            return 1   # HOLD
+
+    df["label"] = df.apply(label, axis=1)
+    df.dropna(subset=["future_return", "_horizon_vol", "label"], inplace=True)
+    df["label"] = df["label"].astype(int)
+    df.drop(columns=["_horizon_vol"], inplace=True)  # diagnostic only — never
+                                                       # let this leak into FEATURES
+    return df
+
 def build_feature_data() -> pd.DataFrame:
     """
     Fetch all symbols + Nifty and compute technical + market-relative
@@ -97,14 +146,22 @@ def build_feature_data() -> pd.DataFrame:
 
 
 def build_training_data(horizon: int = 5, threshold: float = 0.02,
-                         feature_df: pd.DataFrame = None) -> pd.DataFrame:
+                         feature_df: pd.DataFrame = None,
+                         label_mode: str = "fixed",
+                         vol_window: int = 20, vol_k: float = 1.0) -> pd.DataFrame:
     """
     Fetch and prepare training data for all stocks, including
     market-relative and cross-sectional features.
 
     feature_df: pass in the output of build_feature_data() to skip
-                re-fetching when only horizon/threshold are changing
+                re-fetching when only labeling params are changing
                 (see run_label_experiment()). If None, fetches fresh.
+
+    label_mode: "fixed" uses create_labels() (flat ±threshold%, original
+                behavior). "vol_normalized" uses create_labels_vol_normalized()
+                (±k * rolling volatility, adapts the bar per stock instead
+                of applying the same percentage to every stock alike).
+    vol_window, vol_k: only used when label_mode="vol_normalized".
 
     Order matters here:
       1. Per-symbol technical indicators (needs each symbol's own
@@ -113,7 +170,7 @@ def build_training_data(horizon: int = 5, threshold: float = 0.02,
          cross-sectional features — these require every symbol's data
          aligned by date (Nifty comparison, peer-group averages), so
          they can't be computed per-symbol in isolation like step 1.
-      3. Labels LAST, applied per symbol — create_labels() uses
+      3. Labels LAST, applied per symbol — both labeling functions use
          shift(-horizon), which must never cross a symbol boundary
          (step 2's concatenation would otherwise leak SBIN's early
          rows into RELIANCE's label window, etc).
@@ -122,8 +179,15 @@ def build_training_data(horizon: int = 5, threshold: float = 0.02,
 
     labeled_parts = []
     for _, group in combined.groupby("symbol", sort=False):
-        labeled_parts.append(create_labels(group, horizon=horizon,
-                                            threshold=threshold))
+        if label_mode == "fixed":
+            labeled_parts.append(create_labels(group, horizon=horizon,
+                                                threshold=threshold))
+        elif label_mode == "vol_normalized":
+            labeled_parts.append(create_labels_vol_normalized(
+                group, horizon=horizon, vol_window=vol_window, k=vol_k))
+        else:
+            raise ValueError(f"Unknown label_mode: {label_mode!r} "
+                              "(expected 'fixed' or 'vol_normalized')")
     combined = pd.concat(labeled_parts, ignore_index=True)
 
     print(f"\nTotal training rows: {len(combined)}")
@@ -208,7 +272,9 @@ def build_estimator(model_type: str):
 def train_model(calibration: str = "prefit", model_type: str = "rf",
                  horizon: int = 5, threshold: float = 0.02,
                  feature_df: pd.DataFrame = None, save: bool = True,
-                 metrics_out: dict = None):
+                 metrics_out: dict = None, label_mode: str = "fixed",
+                 vol_window: int = 20, vol_k: float = 1.0,
+                 calibration_method: str = "sigmoid"):
     """
     Train and save a signal-classification model.
 
@@ -220,7 +286,7 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
                   Class imbalance is handled via sample_weight since XGBoost
                   has no native class_weight param.
 
-    calibration:
+    calibration: which CV strategy CalibratedClassifierCV uses —
       "prefit" — current approach. Train the model once on X_train, calibrate
                  on a separate held-out X_cal slice via FrozenEstimator.
                  Cheap, but calibrators only see one (smaller) slice of data.
@@ -230,17 +296,28 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
                  5x the training time. Typically more stable when the
                  calibration slice is small.
 
-    horizon, threshold: label definition — BUY/SELL if the future return
-                 over `horizon` days exceeds ±`threshold`. Original default
-                 is horizon=5, threshold=0.02 (±2% over 5 days). See
-                 run_label_experiment() to compare alternatives cheaply.
+    calibration_method: which calibration MATH CalibratedClassifierCV uses —
+      "sigmoid"  — Platt scaling. Assumes a sigmoid-shaped relationship
+                   between raw scores and true probability. Original default.
+      "isotonic" — non-parametric, fits any monotonic shape. Can fit better
+                   with enough calibration data, but is more prone to
+                   overfitting with a small calibration set (~3000 rows
+                   here, split across 3 classes) — untested until now.
+
+    label_mode:
+      "fixed"          — horizon/threshold define BUY/SELL as a flat ±% move
+                          (original definition, horizon=5, threshold=0.02).
+      "vol_normalized" — vol_window/vol_k define BUY/SELL relative to each
+                          stock's own recent volatility instead of a flat
+                          percentage — see create_labels_vol_normalized().
 
     feature_df: pass build_feature_data()'s output to skip re-fetching when
-                 only horizon/threshold change (used by run_label_experiment).
+                 only labeling params change (used by run_label_experiment).
     """
     print("Building training data...")
     df = build_training_data(horizon=horizon, threshold=threshold,
-                              feature_df=feature_df)
+                              feature_df=feature_df, label_mode=label_mode,
+                              vol_window=vol_window, vol_k=vol_k)
 
     # Split chronologically WITHIN each symbol, then recombine — NOT a
     # single sequential split across the concatenated multi-symbol blob.
@@ -328,7 +405,8 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
     print(f"\nMarket-relative features occupy ranks {sorted(relative_ranks)} "
           f"out of {len(FEATURES)} total features.")
 
-    print(f"\nCalibrating confidence scores (method='{calibration}')...")
+    print(f"\nCalibrating confidence scores (cv={calibration!r}, "
+          f"method={calibration_method!r})...")
     if calibration == "cv5":
         # cv=5 needs an *unfitted* estimator — it clones and refits internally
         # on each fold. Give it train+cal combined so calibrators see more data.
@@ -344,20 +422,20 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
                 class_weight="balanced", y=y_cal_fit
             )
             calibrated_model = CalibratedClassifierCV(
-                estimator=fresh_model, method="sigmoid", cv=5
+                estimator=fresh_model, method=calibration_method, cv=5
             )
             calibrated_model.fit(X_cal_fit, y_cal_fit,
                                   sample_weight=fit_sample_weight)
         else:
             calibrated_model = CalibratedClassifierCV(
-                estimator=fresh_model, method="sigmoid", cv=5
+                estimator=fresh_model, method=calibration_method, cv=5
             )
             calibrated_model.fit(X_cal_fit, y_cal_fit)
     elif calibration == "prefit":
         # Reuses the already-trained model above and calibrates its
         # confidence scores on the held-out calibration slice only.
         calibrated_model = CalibratedClassifierCV(
-            estimator=FrozenEstimator(model), method="sigmoid"
+            estimator=FrozenEstimator(model), method=calibration_method
         )
         calibrated_model.fit(X_cal, y_cal)
     else:
@@ -373,15 +451,19 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
                               label=f"Raw {model_type.upper()}")
     print_reliability_report(calibrated_model, X_test, y_test,
                               label=f"Calibrated ({model_type}, {calibration})")
-    print_reliability_comparison(model, calibrated_model, X_test, y_test)
+    raw_reliability_gap, cal_reliability_gap = print_reliability_comparison(
+        model, calibrated_model, X_test, y_test)
 
     if metrics_out is not None:
-        # Lets run_label_experiment() collect results across many runs
-        # without changing this function's normal 3-value return signature
-        # (which train_model()'s other callers already depend on).
+        # Lets run_label_experiment() / run_calibration_experiment() collect
+        # results across many runs without changing this function's normal
+        # 3-value return signature (which train_model()'s other callers
+        # already depend on).
         metrics_out["raw_acc"] = raw_acc
         metrics_out["majority_baseline_acc"] = majority_baseline_acc
         metrics_out["gap"] = raw_acc - majority_baseline_acc
+        metrics_out["raw_reliability_gap"] = raw_reliability_gap
+        metrics_out["cal_reliability_gap"] = cal_reliability_gap
 
     if not save:
         print("\n(save=False — skipping disk write, this was an experiment run)")
@@ -443,14 +525,16 @@ def print_reliability_comparison(raw_model, calibrated_model, X_test, y_test):
     Side-by-side reliability table: raw RF vs. calibrated model, bin by bin,
     on the same held-out test set. Use this to see whether calibration is
     actually correcting overconfidence or just compressing an already-weak
-    signal toward 50%.
+    signal toward 50%. Returns (raw_gap, cal_gap) so callers (e.g.
+    run_calibration_experiment()) can compare methods programmatically
+    instead of only eyeballing printed tables.
     """
     raw_pred, raw_actual = reliability_bins(raw_model, X_test, y_test)
     cal_pred, cal_actual = reliability_bins(calibrated_model, X_test, y_test)
 
     if raw_pred is None or cal_pred is None:
         print("Comparison skipped — not enough data for binning.")
-        return
+        return None, None
 
     print("\nReliability Comparison — Raw vs. Calibrated (BUY class)")
     print("-" * 72)
@@ -468,73 +552,169 @@ def print_reliability_comparison(raw_model, calibrated_model, X_test, y_test):
     print("Smaller gap = better calibrated. If the calibrated gap isn't "
           "meaningfully smaller than the raw gap, calibration isn't the "
           "fix you need — the underlying signal is the bottleneck.")
+    return raw_gap, cal_gap
 
 def run_label_experiment(model_type: str = "rf",
                           combos: list = None) -> pd.DataFrame:
     """
-    Test whether the label definition (horizon/threshold), not the model
-    or features, is the real bottleneck. Fetches price data ONCE via
-    build_feature_data(), then re-labels and retrains for each
-    (horizon, threshold) combo — cheap, since no re-fetching happens.
+    Test whether the label DEFINITION, not the model or features, is the
+    real bottleneck. Fetches price data ONCE via build_feature_data(),
+    then re-labels and retrains for each combo — cheap, since no
+    re-fetching happens between combos.
 
-    combos: list of (horizon, threshold) tuples. Defaults to comparing
-            the original definition against wider/longer alternatives:
-              (5,  0.02)  — original: ±2% over 5 days
-              (5,  0.03)  — wider threshold, same horizon
-              (10, 0.02)  — same threshold, longer horizon
-              (10, 0.03)  — both wider and longer
-            The hypothesis being tested: ±2%/5-day sits near the noise
-            floor for these tickers, and a real signal (if one exists in
-            these features) should show up more clearly at a threshold/
-            horizon combo that isn't dominated by day-to-day noise
-            crossing the boundary by chance.
+    combos: list of dicts, each describing one label configuration:
+      {"label_mode": "fixed", "horizon": 5, "threshold": 0.02}
+        — flat ±% move (create_labels()).
+      {"label_mode": "vol_normalized", "horizon": 5, "vol_k": 1.0}
+        — move relative to the stock's own rolling volatility
+          (create_labels_vol_normalized()) instead of one flat percentage
+          applied to every stock alike (a 2% move means something very
+          different for GOLDBEES than ADANIENT).
+
+    Defaults to a combined sweep: the original fixed definitions plus a
+    vol_k sweep at two horizons, so both hypotheses are compared
+    side-by-side in one ranked table rather than as separate experiments.
     """
     if combos is None:
-        combos = [(5, 0.02), (5, 0.03), (10, 0.02), (10, 0.03)]
+        combos = [
+            {"label_mode": "fixed", "horizon": 5,  "threshold": 0.02},
+            {"label_mode": "fixed", "horizon": 10, "threshold": 0.02},
+            {"label_mode": "vol_normalized", "horizon": 5,  "vol_k": 0.5},
+            {"label_mode": "vol_normalized", "horizon": 5,  "vol_k": 1.0},
+            {"label_mode": "vol_normalized", "horizon": 5,  "vol_k": 1.5},
+            {"label_mode": "vol_normalized", "horizon": 10, "vol_k": 0.5},
+            {"label_mode": "vol_normalized", "horizon": 10, "vol_k": 1.0},
+            {"label_mode": "vol_normalized", "horizon": 10, "vol_k": 1.5},
+        ]
 
     print("Fetching price + market-relative feature data once for all "
           "label combinations...")
     feature_df = build_feature_data()
 
     results = []
-    for horizon, threshold in combos:
-        print(f"\n{'=' * 20}  horizon={horizon}, threshold={threshold:.0%}  {'=' * 20}")
+    for combo in combos:
+        label_mode = combo.get("label_mode", "fixed")
+        horizon    = combo["horizon"]
+
+        kwargs = dict(calibration="prefit", model_type=model_type,
+                      horizon=horizon, feature_df=feature_df,
+                      save=False, label_mode=label_mode)
+        if label_mode == "fixed":
+            threshold = combo.get("threshold", 0.02)
+            kwargs["threshold"] = threshold
+            param_label = f"±{threshold:.0%}"
+        else:
+            vol_k = combo.get("vol_k", 1.0)
+            kwargs["vol_k"] = vol_k
+            kwargs["vol_window"] = combo.get("vol_window", 20)
+            param_label = f"k={vol_k}"
+
+        print(f"\n{'=' * 15}  {label_mode}, horizon={horizon}, {param_label}  {'=' * 15}")
         metrics = {}
-        train_model(calibration="prefit", model_type=model_type,
-                    horizon=horizon, threshold=threshold,
-                    feature_df=feature_df, save=False, metrics_out=metrics)
+        train_model(metrics_out=metrics, **kwargs)
         results.append({
+            "label_mode": label_mode,
             "horizon": horizon,
-            "threshold": threshold,
+            "param": param_label,
             "raw_acc": metrics["raw_acc"],
             "baseline_acc": metrics["majority_baseline_acc"],
             "gap": metrics["gap"],
         })
 
     results_df = pd.DataFrame(results).sort_values("gap", ascending=False)
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 65)
     print(f"LABEL EXPERIMENT SUMMARY ({model_type.upper()})")
-    print("=" * 60)
+    print("=" * 65)
     print(results_df.to_string(index=False,
-          formatters={"threshold": "{:.0%}".format,
-                      "raw_acc": "{:.3f}".format,
+          formatters={"raw_acc": "{:.3f}".format,
                       "baseline_acc": "{:.3f}".format,
                       "gap": "{:+.3f}".format}))
     best = results_df.iloc[0]
     if best["gap"] > 0:
-        print(f"\nBest combo (horizon={int(best['horizon'])}, "
-              f"threshold={best['threshold']:.0%}) clears baseline by "
-              f"{best['gap']:.3f}. This is a real, if modest, edge — "
-              "worth locking in as the new label definition.")
+        print(f"\nBest combo ({best['label_mode']}, horizon={int(best['horizon'])}, "
+              f"{best['param']}) clears baseline by {best['gap']:.3f}. "
+              "This is a real, if modest, edge — worth locking in as the "
+              "new label definition.")
     else:
         print(f"\nBest combo still doesn't clear baseline (gap "
-              f"{best['gap']:+.3f}). None of these thresholds/horizons "
-              "found real signal — the bottleneck likely isn't the label "
-              "either at this point. Consider: (a) longer horizons still "
-              "(20+ days), (b) fundamentally different feature sources "
-              "(order flow, options data, earnings surprises) rather than "
-              "further tuning price-derived technicals.")
+              f"{best['gap']:+.3f}), even after testing volatility-"
+              "normalized labels. That's a meaningfully stronger negative "
+              "result than the fixed-threshold sweep alone — two "
+              "different labeling philosophies both failed. Consider: "
+              "(a) longer horizons still (20+ days), (b) fundamentally "
+              "different feature sources (order flow, options data, "
+              "earnings surprises) rather than further tuning "
+              "price-derived technicals or label definitions.")
     return results_df
+
+
+def run_calibration_experiment(model_type: str = "rf",
+                                horizon: int = 5, threshold: float = 0.02,
+                                combos: list = None) -> pd.DataFrame:
+    """
+    Tests calibration MATH, not accuracy — ranked by reliability gap
+    (mean |predicted confidence - actual accuracy|), not raw_acc. Accuracy
+    has already been shown to sit at/below baseline across every model,
+    feature set, and label definition tried (see run_label_experiment());
+    this experiment answers a different, narrower question: given the
+    accuracy we already have, which calibration approach reports it most
+    honestly?
+
+    Sweeps (cv strategy) x (calibration method):
+      prefit / sigmoid   — current default
+      prefit / isotonic  — same data split, non-parametric calibration
+      cv5    / sigmoid   — cross-validated calibration, already tested
+      cv5    / isotonic  — cross-validated + non-parametric
+
+    Uses a fixed label definition (horizon/threshold) throughout, since
+    this experiment isn't about finding accuracy — it's about calibration
+    quality at whatever accuracy already exists.
+    """
+    if combos is None:
+        combos = [
+            {"calibration": "prefit", "calibration_method": "sigmoid"},
+            {"calibration": "prefit", "calibration_method": "isotonic"},
+            {"calibration": "cv5",    "calibration_method": "sigmoid"},
+            {"calibration": "cv5",    "calibration_method": "isotonic"},
+        ]
+
+    print("Fetching price + market-relative feature data once for all "
+          "calibration combinations...")
+    feature_df = build_feature_data()
+
+    results = []
+    for combo in combos:
+        cv_strategy = combo["calibration"]
+        method      = combo["calibration_method"]
+        print(f"\n{'=' * 15}  cv={cv_strategy}, method={method}  {'=' * 15}")
+        metrics = {}
+        train_model(calibration=cv_strategy, calibration_method=method,
+                    model_type=model_type, horizon=horizon, threshold=threshold,
+                    feature_df=feature_df, save=False, metrics_out=metrics)
+        results.append({
+            "cv": cv_strategy,
+            "method": method,
+            "raw_acc": metrics["raw_acc"],
+            "raw_gap": metrics["raw_reliability_gap"],
+            "cal_gap": metrics["cal_reliability_gap"],
+        })
+
+    results_df = pd.DataFrame(results).sort_values("cal_gap", ascending=True)
+    print("\n" + "=" * 65)
+    print(f"CALIBRATION EXPERIMENT SUMMARY ({model_type.upper()}) — "
+          f"ranked by calibration gap (lower = more honest confidence)")
+    print("=" * 65)
+    print(results_df.to_string(index=False,
+          formatters={"raw_acc": "{:.3f}".format,
+                      "raw_gap": "{:.3f}".format,
+                      "cal_gap": "{:.3f}".format}))
+    best = results_df.iloc[0]
+    print(f"\nBest calibration: cv={best['cv']}, method={best['method']} "
+          f"— gap {best['cal_gap']:.3f}. Compare this to your current "
+          f"production setup (prefit/sigmoid) to see if switching is "
+          f"actually worth it, or if the difference is noise-level.")
+    return results_df
+
 
 
 def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) -> dict:
@@ -612,11 +792,17 @@ if __name__ == "__main__":
     #   python ml/rf_model.py label_experiment     -> rf, sweep horizon/threshold combos,
     #                                                  fetches data once, no models saved
     #   python ml/rf_model.py label_experiment xgboost -> same sweep, xgboost
+    #   python ml/rf_model.py calibration_experiment   -> rf, sweep sigmoid/isotonic x
+    #                                                      prefit/cv5, ranked by calibration gap
     method     = sys.argv[1] if len(sys.argv) > 1 else "prefit"
     model_type = sys.argv[2] if len(sys.argv) > 2 else "rf"
 
     if method == "label_experiment":
         run_label_experiment(model_type=model_type)
+        sys.exit(0)
+
+    if method == "calibration_experiment":
+        run_calibration_experiment(model_type=model_type)
         sys.exit(0)
 
     if method == "compare":

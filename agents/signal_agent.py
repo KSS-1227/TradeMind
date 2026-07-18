@@ -57,18 +57,30 @@ def generate_signal(research_data: dict) -> dict:
     enriched_articles = enrich_articles_for_stock(research_data["headlines"])
     sentiment = analyze_sentiment(enriched_articles)
 
-    # Combine RF + sentiment into final signal
-    final_signal, final_confidence = combine_signals(
-        rf_signal, rf_confidence, sentiment
-    )
+    # Sentiment is surfaced as separate context below — it is NOT blended
+    # into the signal or confidence shown to the user. A calibration audit
+    # (Monte Carlo test against the real combine_signals() code, see
+    # ml/rf_model.py's calibration_experiment work) found that blending an
+    # unvalidated sentiment score into the calibrated RF confidence made
+    # the shown number's calibration gap ~12x worse under the most
+    # defensible assumption (no evidence FinBERT sentiment predicts actual
+    # price moves for this universe — untestable directly, since no
+    # historical sentiment archive matched to past dates exists). Until
+    # sentiment is validated against real outcomes, showing the calibrated
+    # RF probability untouched is the more honest choice — consistent with
+    # this project's own "no embellishment" standard applied to itself.
+    sentiment_note = describe_sentiment_alignment(rf_signal, sentiment)
+
+    final_signal     = rf_signal
+    final_confidence = rf_confidence
 
     # Risk metrics
     close_prices = df["Close"].astype(float)
     risk_metrics = calculate_risk(close_prices, final_signal)
 
     print(f"[Signal Agent] RF: {rf_signal} ({rf_confidence:.2f}) | "
-          f"Sentiment: {sentiment['dominant']} | "
-          f"Final: {final_signal} ({final_confidence:.2f})")
+          f"Sentiment: {sentiment['dominant']} ({sentiment_note}) | "
+          f"Shown as-is — sentiment is context only, not blended into confidence.")
     
     latest_price = float(latest.get("Close", 0))
     if symbol in ["GC=F", "SI=F"]:
@@ -97,6 +109,7 @@ def generate_signal(research_data: dict) -> dict:
         "rf_signal":        rf_signal,
         "rf_confidence":    round(rf_confidence, 3),
         "sentiment":        sentiment,
+        "sentiment_note":   sentiment_note,
         "risk_metrics":     risk_metrics,
         "latest_price":     round(latest_price, 2),
         "probabilities": {
@@ -108,33 +121,29 @@ def generate_signal(research_data: dict) -> dict:
     }
 
 
-def combine_signals(rf_signal: str, rf_conf: float, sentiment: dict) -> tuple:
+def describe_sentiment_alignment(rf_signal: str, sentiment: dict) -> str:
     """
-    Combine RF signal with sentiment.
-    If sentiment unavailable, fall back to pure RF confidence.
+    Plain-English note on whether news sentiment agrees or disagrees with
+    the model's signal — informational only, on purpose. Deliberately does
+    NOT produce a confidence number or change the signal: see the
+    calibration-audit note in generate_signal() for why blending an
+    unvalidated sentiment score into the calibrated RF probability was
+    found to make the shown confidence meaningfully less honest.
     """
-    rf_conf   = float(rf_conf) if rf_conf and not (rf_conf != rf_conf) else 0.5
     dominant  = sentiment.get("dominant", "neutral")
     sent_conf = float(sentiment.get("confidence", 0) or 0)
 
-    # If no news available — return pure RF signal unchanged
     if sent_conf == 0:
-        return rf_signal, rf_conf
-
-    # Sentiment agrees — boost confidence
+        return "No recent news available."
     if rf_signal == "BUY" and dominant == "positive":
-        return "BUY", min(rf_conf + sent_conf * 0.2, 0.99)
-    elif rf_signal == "SELL" and dominant == "negative":
-        return "SELL", min(rf_conf + sent_conf * 0.2, 0.99)
-    # Sentiment disagrees — downgrade to HOLD
-    elif rf_signal == "BUY" and dominant == "negative":
-        return "HOLD", (rf_conf + sent_conf) / 2
-    elif rf_signal == "SELL" and dominant == "positive":
-        return "HOLD", (rf_conf + sent_conf) / 2
-    # Neutral sentiment — return RF signal unchanged
-    else:
-        avg = (rf_conf + sent_conf) / 2
-        return rf_signal, avg
+        return "News sentiment agrees (positive)."
+    if rf_signal == "SELL" and dominant == "negative":
+        return "News sentiment agrees (negative)."
+    if rf_signal == "BUY" and dominant == "negative":
+        return "News sentiment disagrees (negative) — model signal shown as-is, unchanged."
+    if rf_signal == "SELL" and dominant == "positive":
+        return "News sentiment disagrees (positive) — model signal shown as-is, unchanged."
+    return "News sentiment is neutral."
 
 def calculate_risk(close_prices: pd.Series, signal: str) -> dict:
     """Calculate key risk metrics"""

@@ -5,6 +5,9 @@ import {
   CartesianGrid, AreaChart, Area, PieChart, Pie, Cell
 } from "recharts";
 import ScreenerPage from "./ScreenerPage";
+import WhatsAppSubscribePage from "./WhatsAppSubscribePage";
+import AuthPage from "./AuthPage";
+import { useAuth } from "./AuthContext";
 
 const API = "https://kss-1227-trademind.hf.space";
 
@@ -39,6 +42,7 @@ const NAV = [
   { id:"backtest",    icon:"📈", label:"Backtest" },
   { id:"commodities", icon:"🥇", label:"Commodities" },
   { id:"screener",    icon:"💬", label:"Screener" },
+  { id:"whatsapp",    icon:"📲", label:"WhatsApp" },
 ];
 
 // ── Custom hook for screen size ──────────────────────────
@@ -899,6 +903,7 @@ export default function App() {
   const [page,      setPage]      = useState("dashboard");
   const [initStock, setInitStock] = useState(null);
   const [gold,      setGold]      = useState(null);
+  const { isAuthenticated, loading: authLoading, user, signOut } = useAuth();
 
   useEffect(() => {
     const style = document.createElement("style");
@@ -917,6 +922,24 @@ export default function App() {
     window.scrollTo(0, 0);
   };
 
+  // Wait for the initial session check (localStorage lookup) before
+  // deciding whether to show the app or the sign-in page — without this,
+  // a logged-in user briefly flashes the sign-in page on every refresh.
+  if (authLoading) {
+    return (
+      <div style={{
+        minHeight: "100vh", display: "flex", alignItems: "center",
+        justifyContent: "center", background: T.bg, color: T.muted,
+      }}>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <AuthPage />;
+  }
+
   const pages = {
     dashboard:   <Dashboard   onNav={navigate} gold={gold} isMobile={isMobile}/>,
     analyse:     <AnalysePage initialStock={initStock} isMobile={isMobile}/>,
@@ -924,6 +947,7 @@ export default function App() {
     backtest:    <BacktestPage isMobile={isMobile}/>,
     commodities: <CommoditiesPage isMobile={isMobile}/>,
     screener:    <ScreenerPage isMobile={isMobile}/>,
+    whatsapp:    <WhatsAppSubscribePage isMobile={isMobile}/>,
   };
 
   const sidebarW = isMobile ? 0 : 60;
@@ -931,6 +955,21 @@ export default function App() {
   return (
     <>
       <TopBar gold={gold} isMobile={isMobile}/>
+      <div style={{
+        position: "fixed", top: 12, right: 16, zIndex: 200,
+        display: "flex", alignItems: "center", gap: 10, fontSize: 12.5,
+      }}>
+        <span style={{ color: T.muted }}>{user?.email}</span>
+        <button
+          onClick={signOut}
+          style={{
+            background: "transparent", color: T.teal, border: `1px solid ${T.tealDim}`,
+            borderRadius: 6, padding: "4px 10px", fontSize: 12, cursor: "pointer",
+          }}
+        >
+          Sign out
+        </button>
+      </div>
       {!isMobile && (
         <Sidebar active={page} onNav={p=>{setPage(p); setInitStock(null);}}/>
       )}
