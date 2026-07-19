@@ -12,7 +12,7 @@ from agents.pipeline import run_pipeline
 from data.fetch_prices import STOCKS, SCREENER_UNIVERSE, fetch_prices
 from ml.backtest import run_backtest
 from ml.screener import screen_stocks
-from notifications.whatsapp import send_whatsapp_message, format_signal_alert
+from notifications.whatsapp import send_whatsapp_message, format_signal_alert, format_instant_alert
 from notifications.subscriptions import (
     add_subscription, remove_subscription, list_subscriptions,
     symbols_with_subscribers,
@@ -111,6 +111,65 @@ def whatsapp_welcome(request: WhatsAppWelcomeRequest):
         # Log but return 200 — frontend fire-and-forgets this
         print(f"[whatsapp/welcome] Failed to send to {request.phone}: {result.get('error')}")
     return {"sent": result["success"]}
+
+class SendAlertRequest(BaseModel):
+    phone:  str   # E.164, e.g. "+919876543210" — loaded from profile by frontend
+    symbol: str   # e.g. "RELIANCE"
+
+@app.post("/whatsapp/send-alert")
+def whatsapp_send_alert(request: SendAlertRequest):
+    """
+    One-click instant alert — hackathon demo mode.
+    1. Validates phone present.
+    2. Fetches latest signal via existing pipeline (cached if fresh).
+    3. Formats a professional message.
+    4. Sends via Twilio.
+    Returns {success, message, signal, confidence, price}.
+    """
+    phone  = request.phone.strip()
+    symbol = request.symbol.strip().upper()
+
+    if not phone:
+        raise HTTPException(status_code=400, detail="No WhatsApp number provided.")
+
+    # ── Get signal (reuse cache if fresh) ──────────────────
+    ticker = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
+    real_ticker = SYMBOL_MAP.get(ticker, ticker)
+
+    cached = signal_cache.get(ticker)
+    if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
+        signal_data = cached["data"]
+    else:
+        try:
+            signal_data = run_pipeline(real_ticker)
+            if "error" in signal_data:
+                raise HTTPException(status_code=404, detail=signal_data["error"])
+            signal_data["symbol"]    = symbol
+            signal_data["cached"]    = False
+            signal_data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            signal_cache[ticker] = {"timestamp": time.time(), "data": signal_data}
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Signal generation failed: {str(e)}")
+
+    # ── Format & send ───────────────────────────────────────
+    message = format_instant_alert(signal_data)
+    result  = send_whatsapp_message(phone, message)
+
+    if not result["success"]:
+        raise HTTPException(
+            status_code=500,
+            detail=f"WhatsApp delivery failed: {result.get('error', 'unknown error')}"
+        )
+
+    return {
+        "success":    True,
+        "signal":     signal_data.get("signal"),
+        "confidence": signal_data.get("confidence"),
+        "price":      signal_data.get("price"),
+        "symbol":     symbol,
+    }
 
 @app.post("/whatsapp/subscribe")
 def whatsapp_subscribe(request: WhatsAppSubscribeRequest):
