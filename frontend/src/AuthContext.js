@@ -99,21 +99,27 @@ export function AuthProvider({ children }) {
   // NEVER throws — profile failure must not block auth flow.
   const createProfile = async ({ userId, fullName, username, email, whatsappNumber }) => {
     const normalized = whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : null;
-    const { error } = await supabase
+    const payload = {
+      id:              userId,
+      full_name:       fullName,
+      username,
+      email,
+      whatsapp_number: normalized ?? whatsappNumber ?? null,
+    };
+    console.log("[AuthContext] createProfile payload:", payload);
+
+    const { data, error } = await supabase
       .from("profiles")
-      .upsert({
-        id:               userId,
-        full_name:        fullName,
-        username,
-        email,
-        whatsapp_number:  normalized ?? whatsappNumber ?? null,
-      });
+      .upsert(payload)
+      .select()
+      .maybeSingle();
 
     if (error) {
-      console.error(
-        "[AuthContext] Profile upsert failed — auth account still created.",
-        { code: error.code, status: error.status, message: error.message }
-      );
+      console.error("[AuthContext] Profile upsert FAILED:", {
+        code: error.code, status: error.status, message: error.message, details: error.details,
+      });
+    } else {
+      console.log("[AuthContext] Profile upsert saved:", data);
     }
   };
 
@@ -172,6 +178,10 @@ export function AuthProvider({ children }) {
         email,
         whatsappNumber,
       });
+      // Refresh in-memory profile AFTER the row is written.
+      // Without this, the onAuthStateChange fetchProfile() races ahead
+      // of createProfile() and reads a null/incomplete row.
+      await fetchProfile(data.user.id);
       // Welcome message — fire and forget, never blocks signup
       sendWelcomeWhatsApp(whatsappNumber);
     }
