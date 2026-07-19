@@ -4,13 +4,54 @@ import { supabase } from "./supabaseClient";
 
 const AuthContext = createContext(null);
 
+// ─────────────────────────────────────────────────────────────
+// Supabase error → user-facing message map
+// We match on the raw message string because Supabase JS v2 does
+// not expose a stable numeric error code for auth errors.
+// ─────────────────────────────────────────────────────────────
+export function mapSupabaseAuthError(error) {
+  if (!error) return "An unexpected error occurred. Please try again.";
+
+  const msg = (error.message || "").toLowerCase();
+
+  // ── Sign-up errors ───────────────────────────────────────
+  if (msg.includes("user already registered"))
+    return "An account with this email already exists. Try signing in instead.";
+  if (msg.includes("email rate limit") || msg.includes("over_email_send_rate_limit"))
+    return "Too many signup attempts. Please wait a few minutes before trying again.";
+  if (msg.includes("signup is disabled") || msg.includes("signups not allowed"))
+    return "New signups are currently disabled. Please contact support.";
+  if (msg.includes("email already in use") || msg.includes("email taken"))
+    return "This email is already registered. Please sign in or use a different email.";
+  if (msg.includes("password should be at least"))
+    return "Your password is too short. Please use at least 8 characters.";
+  if (msg.includes("unable to validate email address"))
+    return "This email address doesn't appear to be valid.";
+
+  // ── Sign-in errors ───────────────────────────────────────
+  if (msg.includes("invalid login credentials") || msg.includes("invalid credentials"))
+    return "Incorrect email or password. Please try again.";
+  if (msg.includes("email not confirmed"))
+    return "Please confirm your email before signing in. Check your inbox.";
+  if (msg.includes("too many requests") || msg.includes("rate limit"))
+    return "Too many attempts. Please wait a moment and try again.";
+
+  // ── Generic fallback — show the raw message so we can debug ─
+  return error.message || "An unexpected error occurred. Please try again.";
+}
+
+// ─────────────────────────────────────────────────────────────
+// Provider
+// ─────────────────────────────────────────────────────────────
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true); // true until we've checked
-                                                  // for an existing session
-                                                  // once on page load
+  const [loading, setLoading] = useState(true);
 
+  // ── fetchProfile ─────────────────────────────────────────
+  // Uses .maybeSingle() instead of .single() so that a missing
+  // row returns { data: null, error: null } instead of a
+  // PGRST116 error — safe for new users with no profile yet.
   const fetchProfile = useCallback(async (userId) => {
     if (!userId) {
       setProfile(null);
@@ -20,29 +61,25 @@ export function AuthProvider({ children }) {
       .from("profiles")
       .select("*")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
+
     if (error) {
-      // Not fatal — most commonly means the profiles table/migration
-      // hasn't been set up yet. Log it but don't block the UI on it.
-      console.warn("Could not load profile:", error.message);
+      console.warn("[AuthContext] fetchProfile failed:", error.code, error.message);
       setProfile(null);
     } else {
-      setProfile(data);
+      setProfile(data ?? null);
     }
   }, []);
 
+  // ── Session bootstrap ─────────────────────────────────────
   useEffect(() => {
-    // Check for an existing session on first load (e.g. user refreshed
-    // the page — Supabase persists the session in localStorage for us).
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) fetchProfile(session.user.id);
       setLoading(false);
     });
 
-    // Keep session state in sync with sign-in/sign-out/token-refresh
-    // events that happen anywhere in the app.
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (session?.user) {
         fetchProfile(session.user.id);
@@ -54,86 +91,142 @@ export function AuthProvider({ children }) {
     return () => listener.subscription.unsubscribe();
   }, [fetchProfile]);
 
-  const signUp = async ({ fullName, username, email, password }) => {
-    try {
-      const { data, error } = await supabase.auth.signUp({
+  // ── createProfile ─────────────────────────────────────────
+  // Separated so it can be called after confirmed sign-in too.
+  // NEVER throws — profile failure must not block auth flow.
+  const createProfile = async ({ userId, fullName, username, email }) => {
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({
+        id:        userId,
+        full_name: fullName,
+        username,
         email,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-            username,
-          },
-        },
       });
 
-      if (error) throw error;
-
-      if (data.user) {
-        const { error: profileError } = await supabase
-          .from("profiles")
-          .upsert({
-            id: data.user.id,
-            full_name: fullName,
-            username,
-            email,
-          });
-
-        if (profileError) throw profileError;
-      }
-
-      return {
-        success: true,
-        data,
-      };
-    } catch (err) {
-      return {
-        success: false,
-        error: err,
-      };
+    if (error) {
+      // Log for debugging but do NOT surface this as a signup failure.
+      console.error(
+        "[AuthContext] Profile upsert failed — auth account still created.",
+        { code: error.code, status: error.status, message: error.message }
+      );
     }
   };
 
+  // ── signUp ────────────────────────────────────────────────
+  // Production-safe flow:
+  //
+  // Case A — email confirmation DISABLED (session returned immediately):
+  //   → Create profile right away (session exists, RLS passes).
+  //
+  // Case B — email confirmation ENABLED (session is null):
+  //   → Skip profile creation entirely.
+  //   → Profile is created on first sign-in via onAuthStateChange
+  //     → fetchProfile (and a separate ensureProfile call if needed).
+  //
+  // Profile failure in Case A is LOGGED but does NOT fail signup.
+  const signUp = async ({ fullName, username, email, password }) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          // Stored in auth.users.raw_user_meta_data — available before
+          // the profiles row exists.
+          full_name: fullName,
+          username,
+        },
+      },
+    });
+
+    if (error) {
+      console.error("[AuthContext] signUp error:", {
+        code:    error.code,
+        status:  error.status,
+        message: error.message,
+      });
+      return { success: false, error };
+    }
+
+    // Case A — auto-confirm or email confirmation disabled.
+    // data.session is non-null, meaning the user is already authenticated.
+    // RLS allows the insert because auth.uid() == data.user.id.
+    if (data.session) {
+      await createProfile({
+        userId:   data.user.id,
+        fullName,
+        username,
+        email,
+      });
+    }
+    // Case B — confirmation email sent, no session yet.
+    // Profile will be created on first successful sign-in (see signIn below).
+
+    return { success: true, data };
+  };
+
+  // ── signIn ────────────────────────────────────────────────
   const signIn = async (email, password, rememberMe = true) => {
-    // Supabase persists sessions in localStorage by default.
-    // When rememberMe is false we sign in normally but immediately
-    // downgrade the session to sessionStorage-only via a custom flag
-    // that consumers can read.  Full ephemeral-session support would
-    // require initialising the Supabase client with
-    // `auth: { persistSession: false }`, which is a singleton concern.
-    // For now we store the preference so the UI can surface it later.
     if (!rememberMe) {
       sessionStorage.setItem("tm_no_persist", "1");
     } else {
       sessionStorage.removeItem("tm_no_persist");
     }
+
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    return { data, error };
+
+    if (error) {
+      console.error("[AuthContext] signIn error:", {
+        code:    error.code,
+        status:  error.status,
+        message: error.message,
+      });
+      return { data: null, error };
+    }
+
+    // Ensure profile exists — covers:
+    //   • Users who signed up with email confirmation (profile skipped at signup)
+    //   • Users whose profile insert failed at signup
+    if (data.user) {
+      const { data: existing } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (!existing) {
+        // Profile is missing — create it now that we have a valid session.
+        await createProfile({
+          userId:   data.user.id,
+          fullName: data.user.user_metadata?.full_name  ?? "",
+          username: data.user.user_metadata?.username   ?? "",
+          email:    data.user.email                     ?? email,
+        });
+      }
+    }
+
+    return { data, error: null };
   };
 
+  // ── signOut ───────────────────────────────────────────────
   const signOut = async () => {
     sessionStorage.removeItem("tm_no_persist");
     await supabase.auth.signOut();
   };
 
+  // ── forgotPassword ────────────────────────────────────────
   const forgotPassword = async (email) => {
     return supabase.auth.resetPasswordForEmail(email, {
       redirectTo: window.location.origin,
     });
   };
 
-  const refreshProfile = async () => {
-    if (!session?.user) return;
-
-    await fetchProfile(session.user.id);
-  };
-
+  // ── updatePassword ────────────────────────────────────────
   const updatePassword = async (password) => {
-    return supabase.auth.updateUser({
-      password,
-    });
+    return supabase.auth.updateUser({ password });
   };
 
+  // ── updateProfile ─────────────────────────────────────────
   const updateProfile = async (fields) => {
     if (!session?.user) return { error: new Error("Not signed in") };
     const { data, error } = await supabase
@@ -146,9 +239,14 @@ export function AuthProvider({ children }) {
     return { data, error };
   };
 
+  // ── refreshProfile ────────────────────────────────────────
+  const refreshProfile = async () => {
+    if (session?.user) await fetchProfile(session.user.id);
+  };
+
   const value = {
     session,
-    user: session?.user ?? null,
+    user:            session?.user ?? null,
     profile,
     loading,
     isAuthenticated: !!session,
@@ -169,8 +267,6 @@ export function AuthProvider({ children }) {
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth() must be used inside <AuthProvider>");
-  }
+  if (!ctx) throw new Error("useAuth() must be used inside <AuthProvider>");
   return ctx;
 }
