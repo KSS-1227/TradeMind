@@ -1,4 +1,5 @@
 import { MdOutlineEmail, MdLockOutline, MdPersonOutline, MdBadge } from "react-icons/md";
+import { RiWhatsappLine } from "react-icons/ri";
 import InputField from "./InputField";
 import PasswordStrength from "./PasswordStrength";
 import Spinner from "./Spinner";
@@ -52,6 +53,19 @@ export default function SignupForm({
         autoComplete="email"
         icon={<MdOutlineEmail size={16} />}
         error={fieldError?.field === "email" ? fieldError.message : ""}
+      />
+
+      <InputField
+        label="WhatsApp Number"
+        name="whatsappNumber"
+        type="tel"
+        value={form.whatsappNumber}
+        onChange={onChange}
+        placeholder="+919876543210"
+        autoComplete="tel"
+        icon={<RiWhatsappLine size={16} />}
+        hint="Indian number: 9876543210 or +919876543210"
+        error={fieldError?.field === "whatsappNumber" ? fieldError.message : ""}
       />
 
       <InputField

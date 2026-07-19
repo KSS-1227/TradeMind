@@ -1,8 +1,11 @@
 // frontend/src/AuthContext.js
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import axios from "axios";
 import { supabase } from "./supabaseClient";
+import { normalizeWhatsAppNumber } from "./auth/validators";
 
 const AuthContext = createContext(null);
+const HF_API = "https://kss-1227-trademind.hf.space";
 
 // ─────────────────────────────────────────────────────────────
 // Supabase error → user-facing message map
@@ -94,22 +97,36 @@ export function AuthProvider({ children }) {
   // ── createProfile ─────────────────────────────────────────
   // Separated so it can be called after confirmed sign-in too.
   // NEVER throws — profile failure must not block auth flow.
-  const createProfile = async ({ userId, fullName, username, email }) => {
+  const createProfile = async ({ userId, fullName, username, email, whatsappNumber }) => {
+    const normalized = whatsappNumber ? normalizeWhatsAppNumber(whatsappNumber) : null;
     const { error } = await supabase
       .from("profiles")
       .upsert({
-        id:        userId,
-        full_name: fullName,
+        id:               userId,
+        full_name:        fullName,
         username,
         email,
+        whatsapp_number:  normalized ?? whatsappNumber ?? null,
       });
 
     if (error) {
-      // Log for debugging but do NOT surface this as a signup failure.
       console.error(
         "[AuthContext] Profile upsert failed — auth account still created.",
         { code: error.code, status: error.status, message: error.message }
       );
+    }
+  };
+
+  // ── sendWelcomeWhatsApp ───────────────────────────────────
+  // Fire-and-forget after signup. Never throws, never blocks auth flow.
+  const sendWelcomeWhatsApp = async (whatsappNumber) => {
+    const normalized = normalizeWhatsAppNumber(whatsappNumber);
+    if (!normalized) return;
+    try {
+      await axios.post(`${HF_API}/whatsapp/welcome`, { phone: normalized });
+    } catch (e) {
+      // Log only — signup must not fail because of this
+      console.warn("[AuthContext] Welcome WhatsApp failed:", e.message);
     }
   };
 
@@ -125,16 +142,15 @@ export function AuthProvider({ children }) {
   //     → fetchProfile (and a separate ensureProfile call if needed).
   //
   // Profile failure in Case A is LOGGED but does NOT fail signup.
-  const signUp = async ({ fullName, username, email, password }) => {
+  const signUp = async ({ fullName, username, email, password, whatsappNumber }) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
-          // Stored in auth.users.raw_user_meta_data — available before
-          // the profiles row exists.
-          full_name: fullName,
+          full_name:       fullName,
           username,
+          whatsapp_number: normalizeWhatsAppNumber(whatsappNumber) ?? whatsappNumber,
         },
       },
     });
@@ -148,19 +164,17 @@ export function AuthProvider({ children }) {
       return { success: false, error };
     }
 
-    // Case A — auto-confirm or email confirmation disabled.
-    // data.session is non-null, meaning the user is already authenticated.
-    // RLS allows the insert because auth.uid() == data.user.id.
     if (data.session) {
       await createProfile({
-        userId:   data.user.id,
+        userId:         data.user.id,
         fullName,
         username,
         email,
+        whatsappNumber,
       });
+      // Welcome message — fire and forget, never blocks signup
+      sendWelcomeWhatsApp(whatsappNumber);
     }
-    // Case B — confirmation email sent, no session yet.
-    // Profile will be created on first successful sign-in (see signIn below).
 
     return { success: true, data };
   };
@@ -195,12 +209,12 @@ export function AuthProvider({ children }) {
         .maybeSingle();
 
       if (!existing) {
-        // Profile is missing — create it now that we have a valid session.
         await createProfile({
-          userId:   data.user.id,
-          fullName: data.user.user_metadata?.full_name  ?? "",
-          username: data.user.user_metadata?.username   ?? "",
-          email:    data.user.email                     ?? email,
+          userId:         data.user.id,
+          fullName:       data.user.user_metadata?.full_name      ?? "",
+          username:       data.user.user_metadata?.username        ?? "",
+          email:          data.user.email                          ?? email,
+          whatsappNumber: data.user.user_metadata?.whatsapp_number ?? "",
         });
       }
     }

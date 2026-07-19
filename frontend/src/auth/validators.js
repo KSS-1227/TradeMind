@@ -6,9 +6,27 @@ const usernameRegex = /^[a-zA-Z0-9_]{3,20}$/;
 /**
  * Full name: letters (including accented), spaces, hyphens, apostrophes.
  * Min 2, max 60 characters.  No digits.
- * Covers:  John-Doe  |  Mary Jane  |  O'Connell  |  José  |  Ångström
  */
 const fullNameRegex = /^[A-Za-zÀ-ÿ' -]{2,60}$/;
+
+/**
+ * Indian mobile number validator.
+ * Accepts: 9876543210 | 919876543210 | +919876543210
+ * Normalises to E.164: +919876543210
+ */
+export function normalizeWhatsAppNumber(raw) {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10 && /^[6-9]/.test(digits)) return `+91${digits}`;
+  if (digits.length === 12 && digits.startsWith("91") && /^[6-9]/.test(digits[2])) return `+${digits}`;
+  return null; // invalid
+}
+
+export function validateWhatsAppNumber(raw) {
+  if (!raw || !raw.trim()) return "WhatsApp number is required.";
+  const normalized = normalizeWhatsAppNumber(raw.trim());
+  if (!normalized) return "Please enter a valid WhatsApp number.";
+  return null; // valid
+}
 
 /**
  * Strong password — must contain:
@@ -20,10 +38,10 @@ const fullNameRegex = /^[A-Za-zÀ-ÿ' -]{2,60}$/;
  */
 export function passwordStrengthErrors(password) {
   const errors = [];
-  if (password.length < 8)          errors.push("at least 8 characters");
-  if (!/[A-Z]/.test(password))      errors.push("one uppercase letter");
-  if (!/[a-z]/.test(password))      errors.push("one lowercase letter");
-  if (!/\d/.test(password))         errors.push("one number");
+  if (password.length < 8)             errors.push("at least 8 characters");
+  if (!/[A-Z]/.test(password))         errors.push("one uppercase letter");
+  if (!/[a-z]/.test(password))         errors.push("one lowercase letter");
+  if (!/\d/.test(password))            errors.push("one number");
   if (!/[^A-Za-z0-9]/.test(password)) errors.push("one special character");
   return errors; // empty array → valid
 }
@@ -46,11 +64,11 @@ export function validateLogin({ email, password }) {
 }
 
 /**
- * Validates the sign-up form.
+ * Validates the sign-up form (including whatsappNumber).
  * Returns { field, message } on the first error, or null if valid.
  */
-export function validateSignup({ fullName, username, email, password, confirmPassword, acceptTerms }) {
-  const normalized = email.trim();
+export function validateSignup({ fullName, username, email, whatsappNumber, password, confirmPassword, acceptTerms }) {
+  const normalized  = email.trim();
   const trimmedName = fullName.trim();
 
   if (!trimmedName)
@@ -71,6 +89,9 @@ export function validateSignup({ fullName, username, email, password, confirmPas
   if (!normalized) return { field: "email", message: "Email is required." };
   if (!emailRegex.test(normalized))
     return { field: "email", message: "Please enter a valid email address." };
+
+  const waError = validateWhatsAppNumber(whatsappNumber);
+  if (waError) return { field: "whatsappNumber", message: waError };
 
   if (!password) return { field: "password", message: "Password is required." };
   const pwErrors = passwordStrengthErrors(password);

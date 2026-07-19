@@ -87,6 +87,31 @@ class WhatsAppSubscribeRequest(BaseModel):
     phone: str    # E.164 format, e.g. "+919876543210"
     symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
 
+class WhatsAppWelcomeRequest(BaseModel):
+    phone: str
+
+@app.post("/whatsapp/welcome")
+def whatsapp_welcome(request: WhatsAppWelcomeRequest):
+    """
+    Send a one-time welcome WhatsApp message after signup.
+    Called fire-and-forget from the frontend — never fails signup.
+    """
+    message = (
+        "🎉 *Welcome to TradeMind!*\n\n"
+        "Your WhatsApp number has been registered successfully.\n\n"
+        "You'll receive:\n"
+        "📈 Stock Alerts\n"
+        "🤖 AI Recommendations\n"
+        "💼 Portfolio Insights\n"
+        "🚨 Important Notifications\n\n"
+        "TradeMind — AI Co-Pilot for Indian Retail Investors 💹"
+    )
+    result = send_whatsapp_message(request.phone, message)
+    if not result["success"]:
+        # Log but return 200 — frontend fire-and-forgets this
+        print(f"[whatsapp/welcome] Failed to send to {request.phone}: {result.get('error')}")
+    return {"sent": result["success"]}
+
 @app.post("/whatsapp/subscribe")
 def whatsapp_subscribe(request: WhatsAppSubscribeRequest):
     """

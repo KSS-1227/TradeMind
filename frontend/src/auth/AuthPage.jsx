@@ -13,6 +13,7 @@ const initialForm = {
   fullName:        "",
   username:        "",
   email:           "",
+  whatsappNumber:  "",
   password:        "",
   confirmPassword: "",
   acceptTerms:     false,
@@ -74,10 +75,11 @@ export default function AuthPage() {
       // ── Sign Up ──────────────────────────────────────────
       if (mode === "signup") {
         const result = await signUp({
-          fullName: form.fullName.trim(),
-          username: form.username.trim(),
-          email:    normalizedEmail,
-          password: form.password,
+          fullName:       form.fullName.trim(),
+          username:       form.username.trim(),
+          email:          normalizedEmail,
+          password:       form.password,
+          whatsappNumber: form.whatsappNumber.trim(),
         });
 
         if (!result.success) {
