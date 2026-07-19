@@ -49,6 +49,10 @@ export default function WhatsAppSubscribePage({ isMobile }) {
     setLoading(true);
     setResult(null);
     try {
+      // Ping the health endpoint first to wake up the HF Space if sleeping.
+      // Fire-and-forget — we don't block on it, just gives the Space a head start.
+      axios.get(`${API}/health`).catch(() => {});
+
       const res = await axios.post(`${API}/whatsapp/subscribe`, {
         phone: cleaned.startsWith("+") ? cleaned : `+${cleaned}`,
         symbol,
@@ -70,7 +74,18 @@ export default function WhatsAppSubscribePage({ isMobile }) {
         });
       }
     } catch (e) {
-      setResult({ type: "error", message: e.response?.data?.detail || "Something went wrong — try again." });
+      const status = e.response?.status;
+      if (status === 404 || status === 503 || !e.response) {
+        setResult({
+          type: "error",
+          message: "Unable to subscribe — the backend server is starting up (Hugging Face free tier goes to sleep). Wait 30 seconds and try again.",
+        });
+      } else {
+        setResult({
+          type: "error",
+          message: e.response?.data?.detail || "Something went wrong — try again.",
+        });
+      }
     } finally {
       setLoading(false);
     }
