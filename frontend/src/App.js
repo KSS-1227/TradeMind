@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import ScreenerPage from "./ScreenerPage";
 import WhatsAppSubscribePage from "./WhatsAppSubscribePage";
-import AuthPage from "./AuthPage";
+import AuthPage from "./auth/AuthPage";
 import { useAuth } from "./AuthContext";
 
 const API = "https://kss-1227-trademind.hf.space";

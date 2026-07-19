@@ -54,18 +54,84 @@ export function AuthProvider({ children }) {
     return () => listener.subscription.unsubscribe();
   }, [fetchProfile]);
 
-  const signUp = async (email, password) => {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    return { data, error };
+  const signUp = async ({ fullName, username, email, password }) => {
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            username,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .upsert({
+            id: data.user.id,
+            full_name: fullName,
+            username,
+            email,
+          });
+
+        if (profileError) throw profileError;
+      }
+
+      return {
+        success: true,
+        data,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err,
+      };
+    }
   };
 
-  const signIn = async (email, password) => {
+  const signIn = async (email, password, rememberMe = true) => {
+    // Supabase persists sessions in localStorage by default.
+    // When rememberMe is false we sign in normally but immediately
+    // downgrade the session to sessionStorage-only via a custom flag
+    // that consumers can read.  Full ephemeral-session support would
+    // require initialising the Supabase client with
+    // `auth: { persistSession: false }`, which is a singleton concern.
+    // For now we store the preference so the UI can surface it later.
+    if (!rememberMe) {
+      sessionStorage.setItem("tm_no_persist", "1");
+    } else {
+      sessionStorage.removeItem("tm_no_persist");
+    }
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     return { data, error };
   };
 
   const signOut = async () => {
+    sessionStorage.removeItem("tm_no_persist");
     await supabase.auth.signOut();
+  };
+
+  const forgotPassword = async (email) => {
+    return supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin,
+    });
+  };
+
+  const refreshProfile = async () => {
+    if (!session?.user) return;
+
+    await fetchProfile(session.user.id);
+  };
+
+  const updatePassword = async (password) => {
+    return supabase.auth.updateUser({
+      password,
+    });
   };
 
   const updateProfile = async (fields) => {
@@ -86,10 +152,16 @@ export function AuthProvider({ children }) {
     profile,
     loading,
     isAuthenticated: !!session,
-    signUp,
+
     signIn,
+    signUp,
     signOut,
+
+    forgotPassword,
+    updatePassword,
+
     updateProfile,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
