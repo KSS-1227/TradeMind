@@ -947,7 +947,7 @@ export default function App() {
     backtest:    <BacktestPage isMobile={isMobile}/>,
     commodities: <CommoditiesPage isMobile={isMobile}/>,
     screener:    <ScreenerPage isMobile={isMobile}/>,
-    whatsapp:    <WhatsAppSubscribePage isMobile={isMobile}/>,
+    whatsapp:    <WhatsAppSubscribePage isMobile={isMobile} onNav={navigate}/>,
   };
 
   const sidebarW = isMobile ? 0 : 60;

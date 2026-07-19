@@ -1,11 +1,10 @@
 // frontend/src/WhatsAppSubscribePage.js
 import { useState } from "react";
 import axios from "axios";
+import { useAuth } from "./AuthContext";
 
 const API = "https://kss-1227-trademind.hf.space";
 
-// Same theme object as App.js — see the note in ScreenerPage.js about
-// keeping this in sync manually until T is pulled into a shared module.
 const T = {
   bg:"#080E1A", surface:"#0D1F35", raised:"#132840",
   border:"#1E3A5F", teal:"#00C9A7", tealDim:"#009E84",
@@ -19,58 +18,52 @@ const STOCKS = [
   "NIFTYBEES","GOLDBEES","SILVERBEES",
 ];
 
-// Your Twilio sandbox join number + code — from Twilio Console > Messaging
-// > Try it out > Send a WhatsApp message. This is a FREE-tier sandbox
-// limitation: Twilio can only message a number AFTER that number has
-// WhatsApp'd this join code once. Every new subscriber (including judges)
-// needs to do this — there's no way to skip it on the sandbox tier.
-const SANDBOX_NUMBER = "+1 415 523 8886";
-const SANDBOX_JOIN_CODE = "join slept-myself"; // replace with your actual code if it differs
+const SANDBOX_NUMBER    = "+1 415 523 8886";
+const SANDBOX_JOIN_CODE = "join slept-myself";
 
-export default function WhatsAppSubscribePage({ isMobile }) {
-  const [phone, setPhone] = useState("");
-  const [symbol, setSymbol] = useState("RELIANCE");
+const boxStyle = (type) => ({
+  marginTop: 14, padding: "12px 14px", borderRadius: 8, fontSize: 13.5,
+  background: type === "success" ? "rgba(0,201,167,0.1)"
+            : type === "warning" ? "rgba(246,201,14,0.1)"
+            : "rgba(242,92,84,0.1)",
+  border: `1px solid ${type === "success" ? T.tealDim : type === "warning" ? T.gold : T.danger}`,
+  color: T.white,
+  lineHeight: 1.6,
+});
+
+export default function WhatsAppSubscribePage({ isMobile, onNav }) {
+  // Pull profile from AuthContext — already fetched at login, no extra request needed.
+  const { profile } = useAuth();
+  const whatsappNumber = profile?.whatsapp_number ?? null;
+
+  const [symbol,  setSymbol]  = useState("RELIANCE");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState(null); // {type: "success"|"error"|"warning", message}
+  const [result,  setResult]  = useState(null); // { type: "success"|"error"|"warning", message }
 
   const subscribe = async () => {
-    const cleaned = phone.trim();
-    if (!cleaned) {
-      setResult({ type: "error", message: "Enter a phone number first." });
-      return;
-    }
-    // Light validation — full E.164 validation is overkill for a demo form,
-    // but catching "forgot the country code" saves a confusing round trip.
-    if (!/^\+?\d{10,15}$/.test(cleaned.replace(/\s/g, ""))) {
-      setResult({ type: "error", message: "Use format +91XXXXXXXXXX (include country code)." });
-      return;
-    }
+    if (!whatsappNumber) return;
 
     setLoading(true);
     setResult(null);
     try {
-      // Ping the health endpoint first to wake up the HF Space if sleeping.
-      // Fire-and-forget — we don't block on it, just gives the Space a head start.
+      // Wake up HF Space — fire and forget
       axios.get(`${API}/health`).catch(() => {});
 
       const res = await axios.post(`${API}/whatsapp/subscribe`, {
-        phone: cleaned.startsWith("+") ? cleaned : `+${cleaned}`,
+        phone: whatsappNumber,
         symbol,
       });
 
       if (!res.data.added) {
-        setResult({ type: "warning", message: `Already subscribed to ${symbol} on this number.` });
+        setResult({ type: "warning", message: `Already subscribed to ${symbol} alerts.` });
       } else if (res.data.confirmation_sent) {
-        setResult({ type: "success", message: `Subscribed! Check WhatsApp on ${cleaned} for a confirmation message.` });
+        setResult({ type: "success", message: `Subscribed! You'll receive ${symbol} alerts on ${whatsappNumber}.` });
       } else {
-        // Subscription saved, but the confirmation WhatsApp failed to
-        // deliver — almost always means this number hasn't joined the
-        // Twilio sandbox yet. Surface that clearly instead of a vague error.
         setResult({
           type: "warning",
           message: `Saved, but the WhatsApp confirmation didn't deliver `
             + `(${res.data.confirmation_error || "unknown error"}). `
-            + `Have you joined the sandbox? See instructions below.`,
+            + `Have you joined the sandbox? See setup instructions below.`,
         });
       }
     } catch (e) {
@@ -78,7 +71,7 @@ export default function WhatsAppSubscribePage({ isMobile }) {
       if (status === 404 || status === 503 || !e.response) {
         setResult({
           type: "error",
-          message: "Unable to subscribe — the backend server is starting up (Hugging Face free tier goes to sleep). Wait 30 seconds and try again.",
+          message: "Backend is starting up (HF free tier sleeps on inactivity). Wait 30 seconds and try again.",
         });
       } else {
         setResult({
@@ -91,15 +84,6 @@ export default function WhatsAppSubscribePage({ isMobile }) {
     }
   };
 
-  const boxStyle = (type) => ({
-    marginTop: 14, padding: "12px 14px", borderRadius: 8, fontSize: 13.5,
-    background: type === "success" ? "rgba(0,201,167,0.1)"
-              : type === "warning" ? "rgba(246,201,14,0.1)"
-              : "rgba(242,92,84,0.1)",
-    border: `1px solid ${type === "success" ? T.tealDim : type === "warning" ? T.gold : T.danger}`,
-    color: T.white,
-  });
-
   return (
     <div style={{ maxWidth: 520, margin: "0 auto", padding: isMobile ? "16px" : "24px" }}>
       <div style={{ fontSize: 20, fontWeight: 700, color: T.white, marginBottom: 6 }}>
@@ -107,66 +91,95 @@ export default function WhatsAppSubscribePage({ isMobile }) {
       </div>
       <div style={{ fontSize: 13, color: T.muted, marginBottom: 20 }}>
         Get a WhatsApp message the moment a stock's signal changes to BUY or SELL.
-        Works for any number — subscribe with your own.
       </div>
 
-      {/* Sandbox join instructions — shown up front so first-time users
-          (including judges testing this live) don't hit a silent failure. */}
+      {/* ── Registered number card ── */}
+      <div style={{
+        background: T.surface, border: `1px solid ${T.border}`,
+        borderRadius: 10, padding: "14px 16px", marginBottom: 20,
+        display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+      }}>
+        <div>
+          <div style={{ fontSize: 11, color: T.muted, letterSpacing: 0.6, marginBottom: 4, fontWeight: 600 }}>
+            📱 REGISTERED WHATSAPP
+          </div>
+          {whatsappNumber ? (
+            <div style={{ fontSize: 15, fontWeight: 700, color: T.teal, fontFamily: "JetBrains Mono, monospace" }}>
+              {whatsappNumber}{" "}
+              <span style={{ fontSize: 13, color: T.tealDim }}>✓</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: T.danger }}>
+              No WhatsApp number found in your profile.
+            </div>
+          )}
+        </div>
+        {!whatsappNumber && onNav && (
+          <button
+            onClick={() => onNav("profile")}
+            style={{
+              background: "transparent", border: `1px solid ${T.border}`,
+              borderRadius: 7, padding: "7px 14px", color: T.teal,
+              fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+            }}
+          >
+            Go to Profile →
+          </button>
+        )}
+      </div>
+
+      {/* ── Sandbox setup notice ── */}
       <div style={{
         background: T.raised, border: `1px solid ${T.border}`,
         borderRadius: 8, padding: "12px 14px", marginBottom: 20, fontSize: 13,
       }}>
         <div style={{ fontWeight: 600, color: T.white, marginBottom: 6 }}>
-          One-time setup (required by WhatsApp/Twilio's free tier):
+          One-time setup (Twilio free tier requirement):
         </div>
-        <div style={{ color: T.muted }}>
-          Open WhatsApp and send <strong style={{ color: T.teal }}>{SANDBOX_JOIN_CODE}</strong> to{" "}
-          <strong style={{ color: T.teal }}>{SANDBOX_NUMBER}</strong>. Do this once, from the same
-          phone number you subscribe with below — otherwise messages won't deliver.
+        <div style={{ color: T.muted, lineHeight: 1.6 }}>
+          Open WhatsApp and send{" "}
+          <strong style={{ color: T.teal }}>{SANDBOX_JOIN_CODE}</strong> to{" "}
+          <strong style={{ color: T.teal }}>{SANDBOX_NUMBER}</strong>.{" "}
+          Do this once from your registered number — otherwise messages won't deliver.
         </div>
       </div>
 
+      {/* ── Stock selector + subscribe ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         <div>
-          <label style={{ fontSize: 12, color: T.muted, display: "block", marginBottom: 5 }}>
-            Your WhatsApp number
-          </label>
-          <input
-            value={phone}
-            onChange={e => setPhone(e.target.value)}
-            placeholder="+919876543210"
-            style={{
-              width: "100%", background: T.surface, border: `1px solid ${T.border}`,
-              borderRadius: 8, padding: "11px 13px", color: T.white, fontSize: 14, outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
-
-        <div>
-          <label style={{ fontSize: 12, color: T.muted, display: "block", marginBottom: 5 }}>
-            Stock to watch
+          <label style={{ fontSize: 12, color: T.muted, display: "block", marginBottom: 5, fontWeight: 600 }}>
+            STOCK TO WATCH
           </label>
           <select
             value={symbol}
             onChange={e => setSymbol(e.target.value)}
             style={{
               width: "100%", background: T.surface, border: `1px solid ${T.border}`,
-              borderRadius: 8, padding: "11px 13px", color: T.white, fontSize: 14, outline: "none",
-              boxSizing: "border-box",
+              borderRadius: 8, padding: "11px 13px", color: T.white, fontSize: 14,
+              outline: "none", boxSizing: "border-box",
             }}
           >
             {STOCKS.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
 
+        {/* No number → show disabled state with message */}
+        {!whatsappNumber && (
+          <div style={boxStyle("error")}>
+            Please add your WhatsApp number in your profile before subscribing.
+          </div>
+        )}
+
         <button
           onClick={subscribe}
-          disabled={loading}
+          disabled={loading || !whatsappNumber}
           style={{
-            background: T.teal, color: "#04241D", border: "none", borderRadius: 8,
-            padding: "12px 16px", fontWeight: 700, fontSize: 14,
-            cursor: loading ? "default" : "pointer", opacity: loading ? 0.7 : 1, marginTop: 4,
+            background: whatsappNumber ? T.teal : T.dim,
+            color: whatsappNumber ? "#04241D" : T.muted,
+            border: "none", borderRadius: 8, padding: "12px 16px",
+            fontWeight: 700, fontSize: 14, marginTop: 4,
+            cursor: loading || !whatsappNumber ? "not-allowed" : "pointer",
+            opacity: loading ? 0.7 : 1,
           }}
         >
           {loading ? "Subscribing..." : "Subscribe"}
