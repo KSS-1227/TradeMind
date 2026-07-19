@@ -123,8 +123,8 @@ def whatsapp_send_alert(request: SendAlertRequest):
     1. Validates phone present.
     2. Fetches latest signal via existing pipeline (cached if fresh).
     3. Formats a professional message.
-    4. Sends via Twilio.
-    Returns {success, message, signal, confidence, price}.
+    4. Sends via Twilio — propagates the full provider error on failure.
+    Returns {success, message_id, provider, recipient, signal, confidence, price}.
     """
     phone  = request.phone.strip()
     symbol = request.symbol.strip().upper()
@@ -132,13 +132,16 @@ def whatsapp_send_alert(request: SendAlertRequest):
     if not phone:
         raise HTTPException(status_code=400, detail="No WhatsApp number provided.")
 
+    print(f"[send-alert] phone={phone} symbol={symbol}")
+
     # ── Get signal (reuse cache if fresh) ──────────────────
-    ticker = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
+    ticker      = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
     real_ticker = SYMBOL_MAP.get(ticker, ticker)
 
     cached = signal_cache.get(ticker)
     if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
         signal_data = cached["data"]
+        print(f"[send-alert] Using cached signal for {ticker}")
     else:
         try:
             signal_data = run_pipeline(real_ticker)
@@ -147,28 +150,57 @@ def whatsapp_send_alert(request: SendAlertRequest):
             signal_data["symbol"]    = symbol
             signal_data["cached"]    = False
             signal_data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            signal_cache[ticker] = {"timestamp": time.time(), "data": signal_data}
+            signal_cache[ticker]     = {"timestamp": time.time(), "data": signal_data}
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Signal generation failed: {str(e)}")
+
+    print(f"[send-alert] Signal: {signal_data.get('signal')} conf={signal_data.get('confidence')} price={signal_data.get('price')}")
 
     # ── Format & send ───────────────────────────────────────
     message = format_instant_alert(signal_data)
     result  = send_whatsapp_message(phone, message)
 
     if not result["success"]:
+        error_detail = result.get("error", "unknown error")
+        raw          = result.get("raw", {})
+        http_status  = result.get("http_status", 500)
+        print(f"[send-alert] DELIVERY FAILED: {error_detail} | raw={raw}")
         raise HTTPException(
             status_code=500,
-            detail=f"WhatsApp delivery failed: {result.get('error', 'unknown error')}"
+            detail=f"WhatsApp delivery failed: {error_detail}"
         )
+
+    print(f"[send-alert] Delivered. SID={result.get('sid')} recipient={result.get('recipient')}")
 
     return {
         "success":    True,
+        "message_id": result.get("sid"),
+        "provider":   result.get("provider", "twilio"),
+        "recipient":  result.get("recipient"),
         "signal":     signal_data.get("signal"),
         "confidence": signal_data.get("confidence"),
         "price":      signal_data.get("price"),
         "symbol":     symbol,
+    }
+
+
+@app.get("/whatsapp/debug-credentials")
+def whatsapp_debug_credentials():
+    """
+    Diagnostic endpoint — checks whether Twilio credentials are loaded.
+    Does NOT send a message. Safe to call anytime.
+    """
+    import os
+    sid   = os.getenv("TWILIO_ACCOUNT_SID")
+    token = os.getenv("TWILIO_AUTH_TOKEN")
+    frm   = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886 (default)")
+    return {
+        "TWILIO_ACCOUNT_SID":   f"{sid[:6]}...{sid[-4:]}" if sid else "MISSING",
+        "TWILIO_AUTH_TOKEN":    "SET" if token else "MISSING",
+        "TWILIO_WHATSAPP_FROM": frm,
+        "credentials_ready":   bool(sid and token),
     }
 
 @app.post("/whatsapp/subscribe")

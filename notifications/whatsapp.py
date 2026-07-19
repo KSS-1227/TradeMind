@@ -2,36 +2,35 @@
 """
 WhatsApp alert delivery via Twilio's REST API.
 
-Uses plain `requests` calls to Twilio's HTTP API rather than the `twilio`
-PyPI package — one fewer dependency, and consistent with how this codebase
-already calls Firecrawl directly (see data/fetch_news.py) instead of
-pulling in an SDK for a single endpoint.
-
-SETUP (you need to do this — I can't create Twilio credentials for you):
-  1. Sign up at twilio.com (free tier is enough for a hackathon demo).
+SETUP:
+  1. Sign up at twilio.com (free tier is fine for a hackathon demo).
   2. Go to Console > Messaging > Try it out > Send a WhatsApp message.
-     This gives you Twilio's WhatsApp Sandbox number and a join code.
-  3. From your own phone, WhatsApp the join code to the sandbox number —
-     Twilio can only message numbers that have joined the sandbox first.
-     Every recipient (including your test phone) must do this once.
-  4. Set these environment variables (same os.getenv() pattern as
-     FIRECRAWL_API_KEY in data/fetch_news.py):
+     This gives you the sandbox number and a join code.
+  3. From your phone, WhatsApp the join code to the sandbox number once.
+     Every recipient must do this before they can receive messages.
+  4. Set these env vars in Hugging Face Space settings:
        TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
        TWILIO_AUTH_TOKEN=your_auth_token
        TWILIO_WHATSAPP_FROM=whatsapp:+14155238886   (sandbox default)
-
-For a real production launch (not the hackathon sandbox), you'd apply for
-a Twilio WhatsApp Business number — sandbox numbers require the join-code
-step for every user, which doesn't scale past a demo.
 """
 import os
 import requests
 
-TWILIO_ACCOUNT_SID   = os.getenv("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN    = os.getenv("TWILIO_AUTH_TOKEN")
-TWILIO_WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
+# ── Read credentials at call time, not import time ──────────────────────────
+# HF Spaces injects env vars after module import on cold starts.
+# Reading at the top of each function guarantees we always get the live value.
 
 TWILIO_API_URL = "https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json"
+
+
+def _get_credentials():
+    """Return (sid, token, from_number) — read fresh each call so HF Space
+    env-var injection is never missed due to module-level caching."""
+    return (
+        os.getenv("TWILIO_ACCOUNT_SID"),
+        os.getenv("TWILIO_AUTH_TOKEN"),
+        os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886"),
+    )
 
 
 def _normalize_whatsapp_number(phone: str) -> str:
@@ -47,53 +46,87 @@ def _normalize_whatsapp_number(phone: str) -> str:
 
 def send_whatsapp_message(to: str, body: str) -> dict:
     """
-    Send a WhatsApp message via Twilio. Returns a dict — either
-    {"success": True, "sid": ...} or {"success": False, "error": ...}.
-    Never raises — callers (e.g. a loop sending alerts to many
-    subscribers) shouldn't have one failed send kill the whole batch.
+    Send a WhatsApp message via Twilio.
+    Returns:
+      Success: {"success": True,  "sid": "SM...", "provider": "twilio", "recipient": "whatsapp:+91..."}
+      Failure: {"success": False, "error": "<reason>", "http_status": <int>, "raw": {...}}
+    Never raises — callers must check ["success"].
     """
-    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
-        return {
-            "success": False,
-            "error": "Twilio credentials not configured. Set "
-                     "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN env vars — "
-                     "see notifications/whatsapp.py docstring for setup.",
-        }
+    sid, token, from_number = _get_credentials()
 
-    url = TWILIO_API_URL.format(sid=TWILIO_ACCOUNT_SID)
+    # ── Credential check ─────────────────────────────────────
+    if not sid or not token:
+        msg = (
+            f"Twilio credentials missing. "
+            f"TWILIO_ACCOUNT_SID={'SET' if sid else 'MISSING'}, "
+            f"TWILIO_AUTH_TOKEN={'SET' if token else 'MISSING'}. "
+            f"Add them in HF Space Settings → Variables."
+        )
+        print(f"[whatsapp] CREDENTIAL ERROR: {msg}")
+        return {"success": False, "error": msg}
+
+    to_normalized = _normalize_whatsapp_number(to)
+    url           = TWILIO_API_URL.format(sid=sid)
+    payload       = {"From": from_number, "To": to_normalized, "Body": body}
+
+    print(f"[whatsapp] Sending to={to_normalized} from={from_number} url={url}")
+    print(f"[whatsapp] Body preview: {body[:120]}...")
+
     try:
         resp = requests.post(
             url,
-            auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
-            data={
-                "From": TWILIO_WHATSAPP_FROM,
-                "To":   _normalize_whatsapp_number(to),
-                "Body": body,
-            },
+            auth=(sid, token),
+            data=payload,
             timeout=15,
         )
-        data = resp.json()
+        raw  = {}
+        try:
+            raw = resp.json()
+        except Exception:
+            raw = {"raw_text": resp.text[:500]}
+
+        print(f"[whatsapp] Twilio HTTP {resp.status_code}: {raw}")
+
         if resp.status_code in (200, 201):
-            return {"success": True, "sid": data.get("sid")}
+            message_sid = raw.get("sid", "")
+            print(f"[whatsapp] SUCCESS — SID={message_sid}")
+            return {
+                "success":   True,
+                "sid":       message_sid,
+                "provider":  "twilio",
+                "recipient": to_normalized,
+            }
+
+        # Twilio error response — extract the most useful fields
+        twilio_error = raw.get("message") or raw.get("more_info") or f"HTTP {resp.status_code}"
+        twilio_code  = raw.get("code", "")
+        error_msg    = f"Twilio error {twilio_code}: {twilio_error}" if twilio_code else twilio_error
+
+        print(f"[whatsapp] FAILED — {error_msg}")
         return {
-            "success": False,
-            "error": data.get("message", f"Twilio returned HTTP {resp.status_code}"),
+            "success":     False,
+            "error":       error_msg,
+            "http_status": resp.status_code,
+            "raw":         raw,
         }
+
+    except requests.Timeout:
+        msg = "Twilio request timed out after 15 seconds."
+        print(f"[whatsapp] TIMEOUT: {msg}")
+        return {"success": False, "error": msg}
     except requests.RequestException as e:
-        return {"success": False, "error": str(e)}
+        msg = f"Network error calling Twilio: {str(e)}"
+        print(f"[whatsapp] NETWORK ERROR: {msg}")
+        return {"success": False, "error": msg}
 
 
 def format_signal_alert(signal_data: dict) -> str:
-    """
-    Turn a /signal-style response dict (symbol, signal, confidence, price,
-    reasons) into a readable WhatsApp message. Deliberately plain text —
-    WhatsApp doesn't render markdown tables or rich formatting reliably.
-    """
+    """Basic alert format — used by the scheduled check-alerts endpoint."""
     symbol     = signal_data.get("symbol", "?")
     signal     = signal_data.get("signal", "?")
     confidence = signal_data.get("confidence", "?")
     price      = signal_data.get("price", "?")
-    reasons    = signal_data.get("reasons", [])[:3]  # keep it short for WhatsApp
+    reasons    = signal_data.get("reasons", [])[:3]
 
     lines = [
         f"*TradeMind alert: {symbol}*",
@@ -101,55 +134,40 @@ def format_signal_alert(signal_data: dict) -> str:
         f"Price: {price}",
     ]
     if reasons:
-        lines.append("")
-        lines.append("Why:")
-        lines.extend(f"- {r}" for r in reasons)
-    lines.append("")
-    lines.append("This is a calibrated confidence estimate, not financial advice.")
+        lines += ["", "Why:"] + [f"- {r}" for r in reasons]
+    lines += ["", "Not financial advice."]
     return "\n".join(lines)
 
 
 def format_instant_alert(signal_data: dict) -> str:
     """
-    Professional hackathon-demo alert format.
-    Includes price, signal, confidence, reasons, and trade levels.
+    Professional demo alert — includes price, signal, confidence,
+    AI reasons, and calculated entry/target/stop levels.
     """
     symbol     = signal_data.get("symbol", "?")
     signal     = signal_data.get("signal", "HOLD")
     confidence = signal_data.get("confidence", "?")
     price_raw  = signal_data.get("price", "₹0")
     reasons    = signal_data.get("reasons", [])[:3]
-    risk       = signal_data.get("risk", {})
 
-    # Signal emoji
     sig_emoji = {"BUY": "✅", "SELL": "🔴", "HOLD": "⏸️"}.get(signal, "")
 
-    # Derive numeric price for entry/target/stop calculations
     try:
         price_num = float(str(price_raw).replace("₹", "").replace(",", ""))
     except Exception:
         price_num = 0
 
-    # Trade levels based on signal direction
     if signal == "BUY" and price_num:
-        entry_lo  = round(price_num * 0.997, 2)
-        entry_hi  = round(price_num * 1.003, 2)
-        target    = round(price_num * 1.05,  2)
-        stop_loss = round(price_num * 0.96,  2)
         levels = (
-            f"📌 *Entry:* ₹{entry_lo:,.2f} – ₹{entry_hi:,.2f}\n"
-            f"🎯 *Target:* ₹{target:,.2f}\n"
-            f"🛑 *Stop Loss:* ₹{stop_loss:,.2f}"
+            f"📌 *Entry:* ₹{price_num * 0.997:,.2f} – ₹{price_num * 1.003:,.2f}\n"
+            f"🎯 *Target:* ₹{price_num * 1.05:,.2f}\n"
+            f"🛑 *Stop Loss:* ₹{price_num * 0.96:,.2f}"
         )
     elif signal == "SELL" and price_num:
-        entry_lo  = round(price_num * 0.997, 2)
-        entry_hi  = round(price_num * 1.003, 2)
-        target    = round(price_num * 0.95,  2)
-        stop_loss = round(price_num * 1.04,  2)
         levels = (
-            f"📌 *Entry (short):* ₹{entry_lo:,.2f} – ₹{entry_hi:,.2f}\n"
-            f"🎯 *Target:* ₹{target:,.2f}\n"
-            f"🛑 *Stop Loss:* ₹{stop_loss:,.2f}"
+            f"📌 *Entry (short):* ₹{price_num * 0.997:,.2f} – ₹{price_num * 1.003:,.2f}\n"
+            f"🎯 *Target:* ₹{price_num * 0.95:,.2f}\n"
+            f"🛑 *Stop Loss:* ₹{price_num * 1.04:,.2f}"
         )
     else:
         levels = "📌 *Action:* Hold current position"
