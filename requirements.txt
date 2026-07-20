@@ -21,3 +21,4 @@ pyotp
 websockets
 apscheduler
 feedparser
+torch>=2.0,<3.0
