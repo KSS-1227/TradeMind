@@ -1,7 +1,7 @@
 yfinance
 pandas
 numpy
-scikit-learn>=1.6,<2.0
+scikit-learn
 xgboost
 joblib
 transformers
@@ -22,3 +22,5 @@ websockets
 apscheduler
 feedparser
 torch>=2.0,<3.0
+langchain>=1.0
+langchain-openai>=0.2
