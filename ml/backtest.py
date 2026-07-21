@@ -157,83 +157,73 @@ class TradeMindStrategy(bt.Strategy):
                 self.wins += 1
             self.trade_log.append({"date": date_str, "action": "SELL", "price": round(price,2)})
             self.entry_price = None
-# ── 3. Run backtest ────────────────────────────────────────
-def run_backtest(symbol: str, initial_cash: float = 100000.0,
-                 period: str = "2y") -> dict:
+# ── 3. Run backtest from an already-built signal DataFrame ─
+def run_backtest_from_signals(symbol: str, df: pd.DataFrame,
+                               initial_cash: float = 100000.0,
+                               period: str = "2y") -> dict:
     """
-    Run full backtest for a symbol
-    Returns metrics + daily portfolio values
-    """
-    print(f"\nRunning backtest for {symbol}...")
+    The ML-agnostic core of backtesting: takes a DataFrame that already
+    has Date/OHLCV columns AND a 'signal' column (BUY/SELL/HOLD per day),
+    and runs the actual portfolio simulation via backtrader.
 
-    # Generate signals
-    df = generate_historical_signals(symbol, period)
+    Extracted out of run_backtest() so ml/strategy_builder.py's
+    NL-rule-based backtests can reuse this exact simulation logic
+    (stop-loss, max-drawdown circuit breaker, commission, Sharpe/drawdown/
+    win-rate calculation, benchmark comparison) instead of re-implementing
+    it — the simulation itself doesn't care whether the signal came from
+    the trained RF/XGBoost model or a user-typed rule.
+    """
     if df.empty:
         return {"error": f"No data for {symbol}"}
 
-    # Prepare OHLCV data for backtrader
-    bt_df = df[["Date","Open","High","Low","Close","Volume"]].copy()
-
-    # Flatten MultiIndex if needed
+    bt_df = df[["Date", "Open", "High", "Low", "Close", "Volume"]].copy()
     if isinstance(bt_df.columns, pd.MultiIndex):
         bt_df.columns = bt_df.columns.get_level_values(0)
 
-    bt_df["Date"]   = pd.to_datetime(bt_df["Date"])
-    bt_df           = bt_df.set_index("Date")
-    bt_df           = bt_df.astype(float)
-    bt_df           = bt_df.dropna()
+    bt_df["Date"] = pd.to_datetime(bt_df["Date"])
+    bt_df = bt_df.set_index("Date")
+    bt_df = bt_df.astype(float)
+    bt_df = bt_df.dropna()
 
-    # Create backtrader data feed
     data_feed = bt.feeds.PandasData(dataname=bt_df)
 
-    # Set up cerebro
     cerebro = bt.Cerebro()
     cerebro.adddata(data_feed)
     cerebro.addstrategy(TradeMindStrategy, signals=df)
     cerebro.broker.setcash(initial_cash)
-    cerebro.broker.setcommission(commission=0.001)  # 0.1% per trade
+    cerebro.broker.setcommission(commission=0.001)
 
-    # Add analyzers
     cerebro.addanalyzer(bt.analyzers.SharpeRatio,
-                        _name="sharpe", riskfreerate=0.06,
-                        annualize=True, timeframe=bt.TimeFrame.Days)
-    cerebro.addanalyzer(bt.analyzers.DrawDown,    _name="drawdown")
+                         _name="sharpe", riskfreerate=0.06,
+                         annualize=True, timeframe=bt.TimeFrame.Days)
+    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
-    cerebro.addanalyzer(bt.analyzers.TimeReturn,  _name="returns",
-                        timeframe=bt.TimeFrame.Days)
+    cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="returns",
+                         timeframe=bt.TimeFrame.Days)
 
-    # Run
-    results   = cerebro.run()
-    strategy  = results[0]
+    results = cerebro.run()
+    strategy = results[0]
     final_val = cerebro.broker.getvalue()
 
-    # Extract metrics
-    sharpe_ratio = strategy.analyzers.sharpe.get_analysis().get(
-        "sharperatio", 0) or 0
-
-    dd_analysis  = strategy.analyzers.drawdown.get_analysis()
+    sharpe_ratio = strategy.analyzers.sharpe.get_analysis().get("sharperatio", 0) or 0
+    dd_analysis = strategy.analyzers.drawdown.get_analysis()
     max_drawdown = dd_analysis.get("max", {}).get("drawdown", 0)
-
     trade_analysis = strategy.analyzers.trades.get_analysis()
-    total_trades   = trade_analysis.get("total", {}).get("closed", 0)
-    won_trades     = trade_analysis.get("won",   {}).get("total",  0)
-    win_rate       = (won_trades / total_trades * 100) if total_trades > 0 else 0
+    total_trades = trade_analysis.get("total", {}).get("closed", 0)
+    won_trades = trade_analysis.get("won", {}).get("total", 0)
+    win_rate = (won_trades / total_trades * 100) if total_trades > 0 else 0
+    total_return = ((final_val - initial_cash) / initial_cash) * 100
 
-    total_return   = ((final_val - initial_cash) / initial_cash) * 100
-
-    # Daily portfolio values for chart
-    daily_returns  = strategy.analyzers.returns.get_analysis()
+    daily_returns = strategy.analyzers.returns.get_analysis()
     portfolio_curve = []
     value = initial_cash
     for date, ret in daily_returns.items():
         value = value * (1 + ret)
         portfolio_curve.append({
-            "date":  str(date)[:10],
-            "value": round(value, 2),
+            "date": str(date)[:10], "value": round(value, 2),
             "return_pct": round((value - initial_cash) / initial_cash * 100, 2)
         })
 
-    # Nifty50 benchmark
     benchmark = generate_benchmark(period)
 
     print(f"Backtest complete for {symbol}")
@@ -244,18 +234,31 @@ def run_backtest(symbol: str, initial_cash: float = 100000.0,
     print(f"  Total Trades : {total_trades}")
 
     return {
-        "symbol":          symbol,
-        "initial_cash":    initial_cash,
-        "final_value":     round(final_val, 2),
-        "total_return":    round(total_return, 2),
-        "sharpe_ratio":    round(float(sharpe_ratio), 3),
-        "max_drawdown":    round(float(max_drawdown), 2),
-        "win_rate":        round(win_rate, 2),
-        "total_trades":    total_trades,
+        "symbol": symbol,
+        "initial_cash": initial_cash,
+        "final_value": round(final_val, 2),
+        "total_return": round(total_return, 2),
+        "sharpe_ratio": round(float(sharpe_ratio), 3),
+        "max_drawdown": round(float(max_drawdown), 2),
+        "win_rate": round(win_rate, 2),
+        "total_trades": total_trades,
         "portfolio_curve": portfolio_curve,
-        "benchmark":       benchmark,
-        "trade_log":       strategy.trade_log[-10:],
+        "benchmark": benchmark,
+        "trade_log": strategy.trade_log[-10:],
     }
+
+
+def run_backtest(symbol: str, initial_cash: float = 100000.0,
+                 period: str = "2y") -> dict:
+    """
+    Run full backtest for a symbol using the TRAINED ML MODEL's signals.
+    For backtesting a user-typed natural-language rule instead, see
+    ml/strategy_builder.py's backtest_custom_rule() — it reuses
+    run_backtest_from_signals() below rather than duplicating this logic.
+    """
+    print(f"\nRunning backtest for {symbol}...")
+    df = generate_historical_signals(symbol, period)
+    return run_backtest_from_signals(symbol, df, initial_cash, period)
 
 # ── 4. Nifty50 benchmark ───────────────────────────────────
 def generate_benchmark(period: str = "2y") -> list:

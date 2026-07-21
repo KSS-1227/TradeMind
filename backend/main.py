@@ -12,11 +12,13 @@ from agents.pipeline import run_pipeline
 from data.fetch_prices import STOCKS, SCREENER_UNIVERSE, fetch_prices
 from ml.backtest import run_backtest
 from ml.screener import screen_stocks
-from notifications.whatsapp import send_whatsapp_message, format_signal_alert, format_instant_alert
+from ml.strategy_builder import backtest_custom_rule
+from notifications.whatsapp import send_whatsapp_message, format_signal_alert
 from notifications.subscriptions import (
     add_subscription, remove_subscription, list_subscriptions,
     symbols_with_subscribers,
 )
+from agents.langchain_agent import ask_trademind
 from pydantic import BaseModel
 # Ensure model exists on startup
 from startup import ensure_model_exists
@@ -83,125 +85,65 @@ def run_screener(request: ScreenerRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class AskRequest(BaseModel):
+    question: str
+
+@app.post("/ask")
+def ask(request: AskRequest):
+    """
+    Natural-language investment queries via LangChain orchestration.
+    The LLM only decides WHICH tool to call (get_stock_signal,
+    screen_stocks_by_criteria, get_current_price) based on the question —
+    every number in the answer comes from those tools' real, deterministic
+    outputs, never invented by the model. See agents/langchain_agent.py
+    for the full design rationale.
+
+    Requires OPENAI_API_KEY to be set — returns a clear error (not a
+    crash) if it's missing.
+    """
+    if not request.question or not request.question.strip():
+        raise HTTPException(status_code=400, detail="question must not be empty")
+    result = ask_trademind(request.question)
+    if result["error"]:
+        raise HTTPException(status_code=503, detail=result["error"])
+    return {"question": request.question, "answer": result["answer"]}
+
+class StrategyBacktestRequest(BaseModel):
+    query: str    # e.g. "buy when RSI below 30 and MACD above signal"
+    symbol: str   # e.g. "RELIANCE"
+
+@app.post("/strategy/backtest")
+def strategy_backtest(request: StrategyBacktestRequest):
+    """
+    No-Code Strategy Builder. Parses a plain-English rule with the SAME
+    deterministic parser the /screener endpoint uses, then backtests that
+    exact rule against 5 years of real historical data via the same
+    backtrader simulation ml/backtest.py's trained-model backtest uses.
+
+    See ml/strategy_builder.py's STRATEGY_CONVENTION docstring for
+    exactly how a rule maps to buy/sell days — the response's
+    "strategy_convention" field states this explicitly so it's never
+    ambiguous what was actually tested.
+    """
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="query must not be empty")
+    if not request.symbol or not request.symbol.strip():
+        raise HTTPException(status_code=400, detail="symbol must not be empty")
+    try:
+        result = backtest_custom_rule(request.query, request.symbol)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 class WhatsAppSubscribeRequest(BaseModel):
     phone: str    # E.164 format, e.g. "+919876543210"
     symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
-
-class WhatsAppWelcomeRequest(BaseModel):
-    phone: str
-
-@app.post("/whatsapp/welcome")
-def whatsapp_welcome(request: WhatsAppWelcomeRequest):
-    """
-    Send a one-time welcome WhatsApp message after signup.
-    Called fire-and-forget from the frontend — never fails signup.
-    """
-    message = (
-        "🎉 *Welcome to TradeMind!*\n\n"
-        "Your WhatsApp number has been registered successfully.\n\n"
-        "You'll receive:\n"
-        "📈 Stock Alerts\n"
-        "🤖 AI Recommendations\n"
-        "💼 Portfolio Insights\n"
-        "🚨 Important Notifications\n\n"
-        "TradeMind — AI Co-Pilot for Indian Retail Investors 💹"
-    )
-    result = send_whatsapp_message(request.phone, message)
-    if not result["success"]:
-        # Log but return 200 — frontend fire-and-forgets this
-        print(f"[whatsapp/welcome] Failed to send to {request.phone}: {result.get('error')}")
-    return {"sent": result["success"]}
-
-class SendAlertRequest(BaseModel):
-    phone:  str   # E.164, e.g. "+919876543210" — loaded from profile by frontend
-    symbol: str   # e.g. "RELIANCE"
-
-@app.post("/whatsapp/send-alert")
-def whatsapp_send_alert(request: SendAlertRequest):
-    """
-    One-click instant alert — hackathon demo mode.
-    1. Validates phone present.
-    2. Fetches latest signal via existing pipeline (cached if fresh).
-    3. Formats a professional message.
-    4. Sends via Twilio — propagates the full provider error on failure.
-    Returns {success, message_id, provider, recipient, signal, confidence, price}.
-    """
-    phone  = request.phone.strip()
-    symbol = request.symbol.strip().upper()
-
-    if not phone:
-        raise HTTPException(status_code=400, detail="No WhatsApp number provided.")
-
-    print(f"[send-alert] phone={phone} symbol={symbol}")
-
-    # ── Get signal (reuse cache if fresh) ──────────────────
-    ticker      = symbol if symbol.endswith(".NS") else f"{symbol}.NS"
-    real_ticker = SYMBOL_MAP.get(ticker, ticker)
-
-    cached = signal_cache.get(ticker)
-    if cached and (time.time() - cached["timestamp"]) < CACHE_TTL:
-        signal_data = cached["data"]
-        print(f"[send-alert] Using cached signal for {ticker}")
-    else:
-        try:
-            signal_data = run_pipeline(real_ticker)
-            if "error" in signal_data:
-                raise HTTPException(status_code=404, detail=signal_data["error"])
-            signal_data["symbol"]    = symbol
-            signal_data["cached"]    = False
-            signal_data["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            signal_cache[ticker]     = {"timestamp": time.time(), "data": signal_data}
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Signal generation failed: {str(e)}")
-
-    print(f"[send-alert] Signal: {signal_data.get('signal')} conf={signal_data.get('confidence')} price={signal_data.get('price')}")
-
-    # ── Format & send ───────────────────────────────────────
-    message = format_instant_alert(signal_data)
-    result  = send_whatsapp_message(phone, message)
-
-    if not result["success"]:
-        error_detail = result.get("error", "unknown error")
-        raw          = result.get("raw", {})
-        http_status  = result.get("http_status", 500)
-        print(f"[send-alert] DELIVERY FAILED: {error_detail} | raw={raw}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"WhatsApp delivery failed: {error_detail}"
-        )
-
-    print(f"[send-alert] Delivered. SID={result.get('sid')} recipient={result.get('recipient')}")
-
-    return {
-        "success":    True,
-        "message_id": result.get("sid"),
-        "provider":   result.get("provider", "twilio"),
-        "recipient":  result.get("recipient"),
-        "signal":     signal_data.get("signal"),
-        "confidence": signal_data.get("confidence"),
-        "price":      signal_data.get("price"),
-        "symbol":     symbol,
-    }
-
-
-@app.get("/whatsapp/debug-credentials")
-def whatsapp_debug_credentials():
-    """
-    Diagnostic endpoint — checks whether Twilio credentials are loaded.
-    Does NOT send a message. Safe to call anytime.
-    """
-    import os
-    sid   = os.getenv("TWILIO_ACCOUNT_SID")
-    token = os.getenv("TWILIO_AUTH_TOKEN")
-    frm   = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886 (default)")
-    return {
-        "TWILIO_ACCOUNT_SID":   f"{sid[:6]}...{sid[-4:]}" if sid else "MISSING",
-        "TWILIO_AUTH_TOKEN":    "SET" if token else "MISSING",
-        "TWILIO_WHATSAPP_FROM": frm,
-        "credentials_ready":   bool(sid and token),
-    }
 
 @app.post("/whatsapp/subscribe")
 def whatsapp_subscribe(request: WhatsAppSubscribeRequest):
