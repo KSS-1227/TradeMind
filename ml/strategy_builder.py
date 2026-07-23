@@ -80,6 +80,23 @@ def generate_rule_based_signals(query: str, symbol: str, period: str = "5y"):
         signals.append("BUY" if condition_met else "SELL")
     df["signal"] = signals
 
+    # Diagnostic: how often was the rule actually true? A rule combining
+    # contradictory technical conditions (e.g. RSI<30 "oversold/falling"
+    # AND Close>EMA_50 "uptrend") can be true on 0 or very few days across
+    # real history — that produces a correct-but-uninformative 0-trade
+    # backtest, which looks like a bug if you don't know why. Surface it.
+    true_days = sum(1 for s in signals if s == "BUY")
+    total_days = len(signals)
+    true_pct = (true_days / total_days * 100) if total_days else 0
+    print(f"Rule was TRUE on {true_days}/{total_days} days ({true_pct:.1f}%).")
+    if true_days == 0:
+        print("WARNING: the rule never triggered across this history — the "
+              "0-trade result below is expected given that, not a bug. "
+              "This usually means the combined conditions are contradictory "
+              "(e.g. an oversold condition + an uptrend condition rarely "
+              "co-occur). Try a single condition, or a less restrictive "
+              "combination, to confirm the pipeline itself is working.")
+
     return df, [c.describe() for c in conditions], unparsed
 
 
