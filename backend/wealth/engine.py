@@ -20,15 +20,14 @@ NO FastAPI code here.
 
 from __future__ import annotations
 
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from datetime import UTC, datetime
 
 from .schemas import (
+    ProjectionMetadata,
+    ProjectionSummary,
     WealthProjectionRequest,
     WealthProjectionResponse,
-    ProjectionSummary,
-    ProjectionMetadata,
     YearProjection,
 )
 
@@ -72,7 +71,7 @@ class GoalProbability:
 
     probability: float
 
-    required_sip: Optional[float]
+    required_sip: float | None
 
     confidence: str
 
@@ -133,7 +132,7 @@ class WealthEngine:
 
                 years=request.years,
 
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(tz=UTC),
 
             ),
 

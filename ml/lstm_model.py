@@ -309,3 +309,101 @@ if __name__ == "__main__":
     print("=" * 60)
     for k, v in result.items():
         print(f"  {k}: {v}")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Inference API — consumed by HistoricalService as the lstm_provider
+# ──────────────────────────────────────────────────────────────────────────────
+
+class LSTMModelNotTrainedError(RuntimeError):
+    """Raised when the LSTM model files have not been generated yet."""
+
+
+def predict_signal(symbol: str, research_data: dict | None = None) -> dict:
+    """Return an LSTM prediction dict compatible with FusionEngine.
+
+    If the model artefacts are missing this raises
+    ``LSTMModelNotTrainedError`` with a clear message — the caller
+    (HistoricalService) is responsible for surfacing that gracefully.
+
+    The returned dict mirrors the RF ``predict_signal`` contract:
+      signal, confidence, predicted_price, expected_return, available
+    """
+    import os
+    for path, label in [
+        (MODEL_PATH,  "lstm_model.pt"),
+        (SCALER_PATH, "lstm_scaler.pkl"),
+        (TEMP_PATH,   "lstm_temperature.pkl"),
+    ]:
+        if not os.path.exists(path):
+            raise LSTMModelNotTrainedError(
+                f"LSTM model file '{label}' not found at '{path}'. "
+                "Run `python ml/lstm_model.py` to train the model first."
+            )
+
+    import torch
+    from collections.abc import Mapping as _Mapping
+
+    # Load artefacts
+    scaler     = joblib.load(SCALER_PATH)
+    meta       = joblib.load(TEMP_PATH)
+    lookback   = meta.get("lookback", DEFAULT_LOOKBACK)
+    temperature = float(meta.get("temperature", 1.0))
+    n_features = int(meta.get("n_features", len(FEATURES)))
+
+    model = build_lstm_model(n_features=n_features)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+    model.eval()
+
+    # Build feature sequence from research_data
+    if research_data is None or not isinstance(research_data, _Mapping):
+        raise ValueError("research_data must be provided for LSTM inference")
+
+    df = research_data.get("df")
+    if df is None or df.empty:
+        raise ValueError(f"No price DataFrame available in research_data for {symbol}")
+
+    # Ensure required features exist
+    missing = [f for f in FEATURES if f not in df.columns]
+    if missing:
+        raise ValueError(f"research_data DataFrame missing features: {missing}")
+
+    recent = df.tail(lookback)[FEATURES].values.astype(np.float32)
+    if len(recent) < lookback:
+        raise ValueError(
+            f"Not enough history for LSTM sequence: need {lookback} rows, "
+            f"got {len(recent)} for {symbol}"
+        )
+
+    scaled   = scaler.transform(recent)
+    x_tensor = torch.from_numpy(scaled).unsqueeze(0)  # (1, lookback, n_features)
+
+    with torch.no_grad():
+        logits = model(x_tensor)
+        proba  = torch.softmax(logits / temperature, dim=1).squeeze(0).numpy()
+
+    label_map    = {0: "SELL", 1: "HOLD", 2: "BUY"}
+    pred_class   = int(proba.argmax())
+    signal       = label_map[pred_class]
+    confidence   = float(proba[pred_class])
+
+    # Best-effort predicted price: use BUY probability as a trend proxy
+    current_price: float = 0.0
+    if "Close" in df.columns:
+        current_price = float(df["Close"].iloc[-1])
+
+    buy_prob  = float(proba[2])
+    sell_prob = float(proba[0])
+    # Simple directional expected return: positive for BUY lean, negative for SELL lean
+    expected_return = round((buy_prob - sell_prob) * 0.15, 4)  # max ±15% directional estimate
+
+    return {
+        "signal":          signal,
+        "confidence":      round(confidence, 4),
+        "probabilities":   {"SELL": round(float(proba[0]), 4),
+                            "HOLD": round(float(proba[1]), 4),
+                            "BUY":  round(float(proba[2]), 4)},
+        "predicted_price": round(current_price * (1 + expected_return), 2) if current_price else None,
+        "expected_return": expected_return,
+        "available":       True,
+    }

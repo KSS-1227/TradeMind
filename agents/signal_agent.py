@@ -8,6 +8,12 @@ import pandas as pd
 import yfinance as yf
 
 from ml.sentiment import analyze_sentiment
+from data.commodity_pricing import (
+    GRAMS_PER_10_GRAMS,
+    GRAMS_PER_KILOGRAM,
+    rounded_inr,
+    usd_per_troy_ounce_to_indian_landed_price,
+)
 from data.news_enrichment import enrich_articles_for_stock
 from ml.rf_model import FEATURES  # single source of truth — do NOT redefine
                                    # this list here again. It previously was
@@ -89,15 +95,16 @@ def generate_signal(research_data: dict) -> dict:
                             interval="1d", progress=False)
             if isinstance(fx_df.columns, pd.MultiIndex):
                 fx_df.columns = fx_df.columns.get_level_values(0)
-                usd_to_inr    = float(fx_df["Close"].iloc[-1])
-                INDIA_PREMIUM = (1 + 0.15) * (1 + 0.03)
-                if symbol == "GC=F":
-                    latest_price = round(
-                        (latest_price / 31.1035) * 10 * usd_to_inr * INDIA_PREMIUM, 2)
-                else:
-                    latest_price = round(
-                        (latest_price / 32.1507) * 1000 * usd_to_inr * INDIA_PREMIUM, 2
-                    )
+            usd_to_inr = float(fx_df["Close"].iloc[-1])
+            display_grams = (
+                GRAMS_PER_10_GRAMS if symbol == "GC=F"
+                else GRAMS_PER_KILOGRAM
+            )
+            latest_price = rounded_inr(
+                usd_per_troy_ounce_to_indian_landed_price(
+                    latest_price, usd_to_inr, display_grams
+                ).inr_per_display_unit
+            )
         except Exception as e:
             print(f"FX conversion error: {e}")
     

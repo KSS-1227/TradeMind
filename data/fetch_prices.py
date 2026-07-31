@@ -4,6 +4,15 @@ import pandas as pd
 from datetime import datetime
 import os
 import requests
+import logging
+
+from data.commodity_pricing import (
+    GRAMS_PER_10_GRAMS,
+    rounded_inr,
+    usd_per_troy_ounce_to_indian_landed_price,
+)
+
+logger = logging.getLogger(__name__)
 
 # Curated NSE stocks + ETFs for TradeMind's ML MODEL. Kept intentionally
 # small — this is the universe the RF/XGBoost model was trained and
@@ -129,7 +138,7 @@ def fetch_gold_price_inr() -> dict:
     """
     Fetch real gold price in INR per 10 grams
     Converts international USD/troy oz → INR/10g
-    Includes Indian import duty (15%) + GST (3%)
+    Applies the current 6% import duty and 3% GST exactly once.
     """
     try:
         # Fetch gold futures price in USD
@@ -153,16 +162,20 @@ def fetch_gold_price_inr() -> dict:
         gold_usd_per_oz = float(gold_df["Close"].iloc[-1])
         usd_to_inr      = float(usd_inr_df["Close"].iloc[-1])
 
-        # Indian retail gold price calculation
-        # 1 troy oz = 31.1035 grams
-        # Indian retail = international + 15% import duty + 3% GST
-        IMPORT_DUTY   = 0.15
-        GST           = 0.03
-        INDIA_PREMIUM = (1 + IMPORT_DUTY) * (1 + GST)  # = 1.1845
-
-        gold_inr_per_10g = (
-            gold_usd_per_oz / 31.1035
-        ) * 10 * usd_to_inr * INDIA_PREMIUM
+        conversion = usd_per_troy_ounce_to_indian_landed_price(
+            gold_usd_per_oz, usd_to_inr, GRAMS_PER_10_GRAMS
+        )
+        gold_inr_per_10g = rounded_inr(conversion.inr_per_display_unit)
+        logger.debug(
+            "gold_price.conversion",
+            extra={
+                "source": "Yahoo Finance GC=F (COMEX futures)",
+                "raw_usd_per_troy_ounce": str(conversion.raw_usd_per_troy_ounce),
+                "usd_to_inr": str(conversion.usd_to_inr),
+                "inr_per_gram_before_taxes": str(conversion.inr_per_gram_before_taxes),
+                "inr_per_10g": gold_inr_per_10g,
+            },
+        )
 
         # Build historical data for chart
         gold_df.reset_index(inplace=True)
@@ -175,10 +188,13 @@ def fetch_gold_price_inr() -> dict:
             on="Date", how="inner"
         )
 
-        # Apply same Indian premium to historical prices
-        merged["price_10g_inr"] = (
-            (merged["gold_usd"] / 31.1035) * 10 * merged["usd_inr"] * INDIA_PREMIUM
-        ).round(2)
+        # Use the same audited conversion for every historical point.
+        merged["price_10g_inr"] = merged.apply(
+            lambda row: rounded_inr(usd_per_troy_ounce_to_indian_landed_price(
+                row["gold_usd"], row["usd_inr"], GRAMS_PER_10_GRAMS
+            ).inr_per_display_unit),
+            axis=1,
+        )
 
         return {
             "current_price_10g": round(gold_inr_per_10g, 2),

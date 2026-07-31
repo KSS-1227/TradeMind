@@ -1,29 +1,59 @@
 # backend/main.py
-import sys, os
+import os
+import sys
+
+# Add both the project root and backend/ to sys.path so that:
+#   - agents/, data/, ml/, notifications/, startup.py  resolve from project root
+#   - wealth/  resolves from backend/
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+import logging
+import time
+import uuid
 
 import pandas as pd
-import time
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import time
+from pydantic import BaseModel
+from wealth.historical_service import HistoricalService
 
+from agents.langchain_agent import ask_trademind
 from agents.pipeline import run_pipeline
-from data.fetch_prices import STOCKS, SCREENER_UNIVERSE, fetch_prices
+from data.fetch_news import fetch_market_news
+from scam_detector.models import ScamRequest, ScamResponse
+from scam_detector.detector import analyze_message
+from data.fetch_prices import (
+    SCREENER_UNIVERSE,
+    STOCKS,
+    fetch_gold_price_inr,
+    fetch_prices,
+)
+from data.commodity_pricing import (
+    GRAMS_PER_10_GRAMS,
+    GRAMS_PER_KILOGRAM,
+    rounded_inr,
+    usd_per_troy_ounce_to_indian_landed_price,
+)
 from ml.backtest import run_backtest
 from ml.screener import screen_stocks
 from ml.strategy_builder import backtest_custom_rule
-from notifications.whatsapp import send_whatsapp_message, format_signal_alert
+from ml.wealth_calculator import project_wealth
 from notifications.subscriptions import (
-    add_subscription, remove_subscription, list_subscriptions,
+    add_subscription,
+    list_subscriptions,
+    remove_subscription,
     symbols_with_subscribers,
 )
-from agents.langchain_agent import ask_trademind
-from pydantic import BaseModel
+from notifications.whatsapp import format_signal_alert, send_whatsapp_message
+from api_v2 import error as v2_error, router as v2_router
+
 # Ensure model exists on startup
 from startup import ensure_model_exists
+
 ensure_model_exists()
-from data.fetch_news import fetch_market_news
 
 
 app = FastAPI(
@@ -31,6 +61,60 @@ app = FastAPI(
     description="AI Co-Pilot for Indian Retail Investors",
     version="1.0.0"
 )
+
+logger = logging.getLogger(__name__)
+
+
+@app.middleware("http")
+async def v2_request_logging(request: Request, call_next):
+    """Attach a request ID and structured timing logs to every v2 request."""
+
+    request.state.request_id = str(uuid.uuid4())
+    started = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+    response.headers["X-Request-ID"] = request.state.request_id
+    if request.url.path.startswith("/v2/"):
+        logger.info(
+            "v2.request.completed",
+            extra={
+                "request_id": request.state.request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "latency_ms": elapsed_ms,
+            },
+        )
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def v2_validation_error(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/v2/"):
+        logger.info("v2.request.invalid", extra={"request_id": getattr(request.state, "request_id", "unavailable"), "errors": exc.errors()})
+        return v2_error(request, status_code=422, code="VALIDATION_ERROR", message="Request validation failed.")
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+@app.exception_handler(Exception)
+async def v2_unhandled_error(request: Request, exc: Exception):
+    """Prevent implementation details or tracebacks from leaking via v2."""
+
+    logger.exception(
+        "v2.request.failed",
+        extra={"request_id": getattr(request.state, "request_id", "unavailable")},
+    )
+    if request.url.path.startswith("/v2/"):
+        return v2_error(
+            request,
+            status_code=500,
+            code="INTERNAL_ERROR",
+            message="The request could not be completed.",
+        )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
+app.include_router(v2_router)
 
 # Allow React frontend to talk to this API
 app.add_middleware(
@@ -41,7 +125,7 @@ app.add_middleware(
 )
 
 # Cache signals so we don't re-run pipeline on every request
-signal_cache = {}
+signal_cache: dict[str, dict] = {}
 CACHE_TTL = 300  # 5 minutes
 # Map custom symbols to real tickers
 SYMBOL_MAP = {
@@ -82,7 +166,7 @@ def run_screener(request: ScreenerRequest):
     try:
         result = screen_stocks(request.query, universe=SCREENER_UNIVERSE)
         return result
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 class AskRequest(BaseModel):
@@ -138,8 +222,119 @@ def strategy_backtest(request: StrategyBacktestRequest):
         raise HTTPException(status_code=400, detail=str(e))
     except HTTPException:
         raise
-    except Exception as e:
+    except RuntimeError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class WealthProjectRequest(BaseModel):
+    monthly_investment: float
+    years: int
+    expected_annual_return: float = 0.12
+    market_crash_year: int | None = None
+    market_crash_pct: float = 0.20
+
+@app.post("/wealth/project")
+def wealth_project(request: WealthProjectRequest):
+    """
+    Wealth Projection Calculator — pure compound-interest math (future
+    value of a monthly SIP), with an optional one-time market-crash
+    scenario. Stateless: this endpoint does not persist anything.
+    Saving/loading a user's past scenarios happens client-side against
+    Supabase directly (see supabase/migrations/0002_wealth_scenarios.sql
+    and frontend/src/WealthCalculatorPage.js) — same division of
+    responsibility as the rest of this backend.
+    """
+    try:
+        return project_wealth(
+            monthly_investment=request.monthly_investment,
+            years=request.years,
+            expected_annual_return=request.expected_annual_return,
+            market_crash_year=request.market_crash_year,
+            market_crash_pct=request.market_crash_pct,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except (RuntimeError, OSError) as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class HoldingRequest(BaseModel):
+    symbol: str
+    quantity: float
+    buy_price: float
+
+
+class PortfolioAnalyzeRequest(BaseModel):
+    holdings: list[HoldingRequest]
+
+
+@app.post("/portfolio/analyze")
+def analyze_portfolio(request: PortfolioAnalyzeRequest):
+    """
+    AI Portfolio Doctor.
+
+    Analyses each holding using Research → Random Forest → LSTM → FinBERT → Fusion.
+    If the LSTM model files are not yet trained, the analysis still runs using
+    RF + FinBERT only and the response includes a 'lstm_status' warning.
+
+    Returns per-holding AI analysis: signal, confidence, risk, recommendation,
+    P&L, and reasoning.
+    """
+    if not request.holdings:
+        raise HTTPException(status_code=400, detail="holdings list must not be empty")
+
+    service = HistoricalService()
+    results = []
+
+    for holding in request.holdings:
+        symbol = holding.symbol.strip().upper()
+        if not symbol.endswith(".NS") and symbol not in {"GC=F", "SI=F"}:
+            symbol = symbol + ".NS"
+
+        try:
+            analysis     = service.analyze(symbol)
+            current_price = analysis.current_price
+            invested      = holding.quantity * holding.buy_price
+            market_value  = holding.quantity * current_price
+            pnl           = market_value - invested
+            pnl_pct       = round((pnl / invested) * 100, 2) if invested > 0 else 0.0
+
+            # Surface LSTM availability from explainability metadata
+            available_models = analysis.explainability.get("available_models", [])
+            lstm_status = (
+                "available" if "lstm" in available_models else
+                "not_trained — LSTM model files missing; run `python ml/lstm_model.py` to train"
+            )
+
+            results.append({
+                "symbol":           holding.symbol.upper(),
+                "quantity":         holding.quantity,
+                "buy_price":        holding.buy_price,
+                "current_price":    current_price,
+                "invested_amount":  round(invested, 2),
+                "market_value":     round(market_value, 2),
+                "pnl":              round(pnl, 2),
+                "pnl_percent":      pnl_pct,
+                "recommendation":   analysis.recommendation,
+                "confidence":       analysis.confidence,
+                "overall_risk":     analysis.overall_risk,
+                "overall_score":    analysis.overall_score,
+                "trend":            analysis.trend,
+                "sentiment":        analysis.sentiment,
+                "sentiment_score":  analysis.sentiment_score,
+                "predicted_price":  analysis.predicted_price,
+                "expected_return":  analysis.expected_return,
+                "agreement":        analysis.agreement,
+                "model_agreement":  analysis.model_agreement,
+                "lstm_status":      lstm_status,
+                "reasoning":        analysis.reasoning[:3],
+            })
+        except (ValueError, RuntimeError, OSError) as e:
+            results.append({
+                "symbol": holding.symbol.upper(),
+                "error":  str(e),
+            })
+
+    return {"holdings": results, "count": len(results)}
+
 
 class WhatsAppSubscribeRequest(BaseModel):
     phone: str    # E.164 format, e.g. "+919876543210"
@@ -174,11 +369,11 @@ def whatsapp_unsubscribe(request: WhatsAppSubscribeRequest):
     return remove_subscription(request.phone, request.symbol)
 
 @app.get("/whatsapp/subscriptions")
-def whatsapp_list_subscriptions(symbol: str = None):
+def whatsapp_list_subscriptions(symbol: str | None = None):
     """Debug/admin view of current subscriptions. Not phone-number-scoped
     auth — fine for a hackathon demo, but don't ship this route as-is to
     a real product without adding access control."""
-    return {"subscriptions": list_subscriptions(symbol)}
+    return {"subscriptions": list_subscriptions(symbol if symbol is not None else None)}
 
 @app.post("/whatsapp/check-alerts")
 def whatsapp_check_alerts():
@@ -201,7 +396,7 @@ def whatsapp_check_alerts():
         real_ticker = SYMBOL_MAP.get(symbol, symbol)
         try:
             signal_data = run_pipeline(real_ticker)
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             errors.append({"symbol": symbol, "error": str(e)})
             continue
         if "error" in signal_data:
@@ -257,7 +452,7 @@ def get_signal(symbol: str):
 
     except HTTPException:
         raise
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/signals/all")
@@ -268,7 +463,7 @@ def get_all_signals():
         try:
             result = run_pipeline(stock)
             results.append(result)
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             results.append({"symbol": stock, "error": str(e)})
     return {"signals": results, "count": len(results)}
 
@@ -302,12 +497,18 @@ def get_prices(symbol: str):
             if isinstance(usd_inr_df.columns, pd.MultiIndex):
                 usd_inr_df.columns = usd_inr_df.columns.get_level_values(0)
             latest_fx = float(usd_inr_df["Close"].iloc[-1])
-            INDIA_PREMIUM = (1 + 0.15) * (1 + 0.03)
             # Gold: per 10 grams | Silver: per kg
             if real_ticker == "GC=F":
-                df["Close"] = (df["Close"] / 31.1035) * 10 * latest_fx * INDIA_PREMIUM
+                display_grams = GRAMS_PER_10_GRAMS
             else:
-                df["Close"] = (df["Close"] / 32.1507) * 1000 * latest_fx * INDIA_PREMIUM
+                display_grams = GRAMS_PER_KILOGRAM
+            df["Close"] = df["Close"].apply(
+                lambda raw_price: rounded_inr(
+                    usd_per_troy_ounce_to_indian_landed_price(
+                        raw_price, latest_fx, display_grams
+                    ).inr_per_display_unit
+                )
+            )
 
     result = []
     for _, row in df.iterrows():
@@ -316,7 +517,7 @@ def get_prices(symbol: str):
                 "Date":  str(row["Date"])[:10],
                 "Close": round(float(row["Close"]), 2)
             })
-        except:
+        except (KeyError, TypeError, ValueError):
             continue
 
     return {"data": result}
@@ -333,9 +534,9 @@ def get_backtest(symbol: str):
         return result
     except HTTPException:
         raise
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         raise HTTPException(status_code=500, detail=str(e))
-from data.fetch_prices import fetch_gold_price_inr
+
 
 @app.get("/gold")
 def get_gold_price():
@@ -350,5 +551,18 @@ def get_market_news():
     try:
         headlines = fetch_market_news(days=3)
         return {"headlines": headlines, "count": len(headlines)}
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         return {"headlines": [], "count": 0, "error": str(e)}
+@app.post(
+    "/scam/analyze",
+    response_model=ScamResponse,
+    tags=["AI Scam Detector"],
+)
+async def scam_analyze(request: ScamRequest):
+    """
+    Analyze investment messages, WhatsApp tips,
+    Telegram channels, SMS, or emails for
+    potential investment scams.
+    """
+
+    return analyze_message(request.message)

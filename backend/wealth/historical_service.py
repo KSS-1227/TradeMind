@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, is_dataclass
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, Field
 
 from backend.wealth.fusion_engine import FusionEngine, FusionResult
-
 
 logger = logging.getLogger(__name__)
 
@@ -73,30 +73,27 @@ class PredictionPipelineError(HistoricalServiceError):
 
 
 class HistoricalService:
-    """Coordinate the current TradeMind pipeline through injected adapters.
+    """Coordinate the TradeMind pipeline: Research → RF → LSTM → FinBERT → Fusion.
 
-    ``research`` is the repository's existing entry point that fetches market
-    data, calls ``technical.py``, and calls ``market_relative.py``. RF defaults
-    to the existing ``ml.rf_model.predict_signal`` API. XGBoost and LSTM have
-    no public prediction functions in this checkout, so their deployed
-    adapters must be injected by the caller rather than reimplemented here.
+    XGBoost is not part of this stack. The pipeline combines:
+      - Random Forest  (primary signal)
+      - LSTM           (sequential price-trend prediction)
+      - FinBERT        (news sentiment)
     """
 
     def __init__(
         self,
         research_provider: ResearchProvider | None = None,
         rf_provider: PredictionProvider | None = None,
-        xgb_provider: PredictionProvider | None = None,
         lstm_provider: PredictionProvider | None = None,
         sentiment_provider: SentimentProvider | None = None,
         fusion_engine: FusionEngine | None = None,
     ) -> None:
-        self._research = research_provider or self._default_research_provider()
-        self._rf = rf_provider or self._default_rf_provider()
-        self._xgb = xgb_provider
-        self._lstm = lstm_provider
+        self._research  = research_provider  or self._default_research_provider()
+        self._rf        = rf_provider        or self._default_rf_provider()
+        self._lstm      = lstm_provider      or self._default_lstm_provider()
         self._sentiment = sentiment_provider or self._default_sentiment_provider()
-        self._fusion = fusion_engine or FusionEngine()
+        self._fusion    = fusion_engine      or FusionEngine()
 
     def analyze(self, symbol: str) -> HistoricalAnalysis:
         """Run research, predictions, fusion, and response mapping for a symbol."""
@@ -153,19 +150,36 @@ class HistoricalService:
     def _run_predictions(
         self, symbol: str, research_data: Mapping[str, Any]
     ) -> dict[str, Mapping[str, Any]]:
-        providers = {
-            "random_forest": self._rf,
-            "xgboost": self._xgb,
-            "lstm": self._lstm,
-        }
-        missing = [name for name, provider in providers.items() if provider is None]
-        if missing:
-            raise PredictionPipelineError(
-                "Missing prediction provider(s): " + ", ".join(missing)
-            )
+        """Run RF and LSTM providers. LSTM model-not-trained errors surface as
+        a structured dict so the endpoint can return a clear message instead of
+        crashing the whole request."""
+        from ml.lstm_model import LSTMModelNotTrainedError
+
+        rf_result = self._run_provider("random_forest", self._rf, symbol, research_data)
+
+        try:
+            lstm_result = self._run_provider("lstm", self._lstm, symbol, research_data)
+        except PredictionPipelineError as exc:
+            if isinstance(exc.__cause__, LSTMModelNotTrainedError):
+                # Graceful fallback: mark LSTM unavailable, keep RF result
+                logger.warning(
+                    "lstm_model_not_trained",
+                    extra={"ticker": symbol, "reason": str(exc.__cause__)},
+                )
+                lstm_result = {
+                    "available": False,
+                    "error": str(exc.__cause__),
+                    "signal": None,
+                    "confidence": 0.0,
+                    "predicted_price": None,
+                    "expected_return": None,
+                }
+            else:
+                raise
+
         return {
-            name: self._run_provider(name, provider, symbol, research_data)
-            for name, provider in providers.items()
+            "random_forest": rf_result,
+            "lstm":          lstm_result,
         }
 
     def _run_provider(
@@ -202,7 +216,6 @@ class HistoricalService:
         try:
             result = self._fusion.combine(
                 random_forest=predictions["random_forest"],
-                xgboost=predictions["xgboost"],
                 lstm=predictions["lstm"],
                 finbert=sentiment,
             )
@@ -260,6 +273,15 @@ class HistoricalService:
         return predict
 
     @staticmethod
+    def _default_lstm_provider() -> PredictionProvider:
+        from ml.lstm_model import predict_signal as lstm_predict_signal
+
+        def predict(symbol: str, research_data: Mapping[str, Any]) -> Mapping[str, Any]:
+            return lstm_predict_signal(symbol, research_data)
+
+        return predict
+
+    @staticmethod
     def _default_sentiment_provider() -> SentimentProvider:
         from data.news_enrichment import enrich_articles_for_stock
         from ml.sentiment import analyze_sentiment
@@ -312,7 +334,7 @@ class HistoricalService:
 
     @staticmethod
     def _trend(predictions: Mapping[str, Mapping[str, Any]]) -> str:
-        for name in ("lstm", "xgboost", "random_forest"):
+        for name in ("lstm", "random_forest"):
             result = predictions[name]
             label = result.get("signal") or result.get("label") or result.get("prediction")
             if label:

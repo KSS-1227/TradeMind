@@ -6,9 +6,10 @@ engineer features, load models, calibrate probabilities, or run inference.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import isfinite
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,12 +21,15 @@ LABELS = (SELL, HOLD, BUY)
 
 @dataclass(frozen=True, slots=True)
 class FusionConfig:
-    """Configurable weights and thresholds for ensemble decisions."""
+    """Configurable weights and thresholds for ensemble decisions.
 
-    RF_WEIGHT: float = 0.30
-    XGB_WEIGHT: float = 0.30
-    LSTM_WEIGHT: float = 0.20
-    FINBERT_WEIGHT: float = 0.20
+    XGBoost has been removed from the stack. Weights are rebalanced across
+    Random Forest (primary), LSTM (sequential) and FinBERT (sentiment).
+    """
+
+    RF_WEIGHT: float = 0.40
+    LSTM_WEIGHT: float = 0.35
+    FINBERT_WEIGHT: float = 0.25
     STRONG_BUY_THRESHOLD: float = 0.72
     BUY_THRESHOLD: float = 0.55
     SELL_THRESHOLD: float = 0.45
@@ -52,8 +56,7 @@ class FusionConfig:
     MEDIUM_RISK_THRESHOLD: float = 0.30
 
     def __post_init__(self) -> None:
-        weights = (self.RF_WEIGHT, self.XGB_WEIGHT,
-                   self.LSTM_WEIGHT, self.FINBERT_WEIGHT)
+        weights = (self.RF_WEIGHT, self.LSTM_WEIGHT, self.FINBERT_WEIGHT)
         if any(weight < 0 for weight in weights) or sum(weights) <= 0:
             raise ValueError("Fusion weights must be non-negative and non-zero")
         if not 0 <= self.STRONG_SELL_THRESHOLD <= self.SELL_THRESHOLD <= self.BUY_THRESHOLD <= self.STRONG_BUY_THRESHOLD <= 1:
@@ -97,20 +100,20 @@ class FusionEngine:
         random_forest: Any,
         lstm: Any,
         finbert: Any,
-        xgboost: Any = None,
         *,
-        calibrated_rf: Any = None,
-        calibrated_xgb: Any = None,
         volatility: float | None = None,
         expected_return: float | None = None,
         **legacy_inputs: Any,
     ) -> FusionResult:
-        """Fuse one vote per model; calibrated payloads replace raw payloads."""
+        """Fuse RF, LSTM and FinBERT outputs into one decision.
+
+        XGBoost has been removed. Any ``xgboost`` kwarg passed by legacy
+        callers is silently ignored via ``**legacy_inputs``.
+        """
         random_forest = random_forest or legacy_inputs.get("rf")
         finbert = finbert or legacy_inputs.get("sentiment")
         signals = [
-            self._signal("random_forest", random_forest, calibrated_rf),
-            self._signal("xgboost", xgboost, calibrated_xgb),
+            self._signal("random_forest", random_forest),
             self._signal("lstm", lstm),
         ]
         sentiment = self._sentiment(finbert)
@@ -144,10 +147,9 @@ class FusionEngine:
             weighted_scores={name: round(value * 100, 2) for name, value in weighted_scores.items()},
         )
 
-    def _signal(self, name: str, raw: Any, calibrated: Any = None) -> _Signal:
-        payload = self._mapping(calibrated if calibrated is not None else raw)
-        raw_payload = self._mapping(raw)
-        available = bool(payload.get("available", raw_payload.get("available", raw is not None)))
+    def _signal(self, name: str, raw: Any) -> _Signal:
+        payload = self._mapping(raw)
+        available = bool(payload.get("available", raw is not None))
         probabilities = payload.get("probabilities", payload.get("calibrated_probabilities", {}))
         score = self._directional_score(probabilities, payload)
         label = payload.get("signal", payload.get("label", payload.get("prediction")))
@@ -175,8 +177,9 @@ class FusionEngine:
         return _Signal("finbert", score, certainty, dominant, bool(payload.get("available", raw is not None)))
 
     def _weights(self, signals: Sequence[_Signal], sentiment: _Signal) -> dict[str, float]:
-        configured = {"random_forest": self.config.RF_WEIGHT, "xgboost": self.config.XGB_WEIGHT,
-                      "lstm": self.config.LSTM_WEIGHT, "finbert": self.config.FINBERT_WEIGHT}
+        configured = {"random_forest": self.config.RF_WEIGHT,
+                      "lstm": self.config.LSTM_WEIGHT,
+                      "finbert": self.config.FINBERT_WEIGHT}
         return {name: weight for name, weight in configured.items()
                 if (name == "finbert" and sentiment.available) or
                 any(signal.name == name and signal.available for signal in signals)}

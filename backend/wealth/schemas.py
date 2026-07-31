@@ -5,7 +5,6 @@ Pydantic request/response models for the AI Wealth Planner.
 """
 
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -33,9 +32,9 @@ class WealthProjectionRequest(BaseModel):
         le=50
     )
 
-    goal_amount: Optional[float] = Field(default=None, ge=0)
+    goal_amount: float | None = Field(default=None, ge=0)
 
-    scenario_name: Optional[str] = None
+    scenario_name: str | None = None
 
     @field_validator("scenario_name")
     @classmethod
@@ -47,24 +46,21 @@ class WealthProjectionRequest(BaseModel):
 
 class YearProjection(BaseModel):
     year: int
-
+    opening_balance: float = 0.0
+    yearly_contribution: float = 0.0
+    yearly_interest: float = 0.0
     invested: float
-
     corpus: float
-
     gain: float
 
 
 class ProjectionSummary(BaseModel):
     invested_amount: float
-
     projected_value: float
-
     estimated_gain: float
-
     inflation_adjusted_value: float
-
     real_return: float
+    wealth_multiple: float = 0.0
 
 
 class ProjectionMetadata(BaseModel):
@@ -79,7 +75,8 @@ class ProjectionMetadata(BaseModel):
 
 class WealthProjectionResponse(BaseModel):
     summary: ProjectionSummary
-
-    yearly_breakdown: List[YearProjection]
-
+    yearly_breakdown: list[YearProjection]
     metadata: ProjectionMetadata
+    historical_analysis: dict = Field(default_factory=dict)
+    goal_probability: dict = Field(default_factory=dict)
+    advisor_context: dict = Field(default_factory=dict)

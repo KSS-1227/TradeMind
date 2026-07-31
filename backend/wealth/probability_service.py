@@ -19,10 +19,7 @@ Future Versions
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel
-
 
 # ==========================================================
 # MODELS
@@ -35,7 +32,7 @@ class GoalProbability(BaseModel):
 
     confidence: str
 
-    required_sip: Optional[float] = None
+    required_sip: float | None = None
 
     projected_shortfall: float = 0
 
@@ -66,7 +63,7 @@ class ProbabilityService:
     @staticmethod
     def estimate(
 
-        goal_amount: Optional[float],
+        goal_amount: float | None,
 
         projected_value: float,
 

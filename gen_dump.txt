@@ -1,0 +1,208 @@
+"""
+backend/wealth/advisor/recommendations/generator.py
+
+TradeMind Recommendation Generator
+
+Synthesizes actionable investment recommendations from
+RiskEvaluation and OpportunityEvaluation.
+
+Responsibilities
+----------------
+✓ Validate inputs
+✓ Build RecommendationContext
+✓ Build per-holding recommendations via policy chain
+✓ Build portfolio-level recommendations
+✓ Deduplicate and sort by priority
+✓ Build RecommendationSummary and RecommendationEvaluation
+
+Design Rules
+------------
+This module MUST NOT:
+  - Calculate AI scores, risk scores, or opportunity scores
+  - Calculate confidence
+  - Duplicate analyzer logic
+
+It only synthesises existing DTOs from RiskEvaluator and
+OpportunityEvaluator.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from datetime import UTC, datetime
+
+from backend.wealth.portfolio_analyzer import (
+    HoldingAnalysis,
+    PortfolioAnalysis,
+)
+
+from ..enums import AdviceCategory, Priority, RecommendationType
+from ..models import AdviceItem
+from ..opportunity.models import (
+    HoldingOpportunitySummary,
+    OpportunityEvaluation,
+)
+from ..risk.models import HoldingRiskSummary, RiskEvaluation
+from .config import RecommendationConfig
+from .models import (
+    AllocationRecommendation,
+    HoldingRecommendation,
+    RecommendationContext,
+    RecommendationEvaluation,
+    RecommendationSummary,
+)
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Internal type aliases
+# ---------------------------------------------------------------------------
+_RiskIndex = dict[str, HoldingRiskSummary]
+_OpportunityIndex = dict[str, HoldingOpportunitySummary]
+_CopyBuilder = Callable[
+    [str, float, float, float],
+    tuple[str, str, AdviceCategory],
+]
+
+# ---------------------------------------------------------------------------
+# Priority sort order — defined once, never recomputed
+# ---------------------------------------------------------------------------
+_PRIORITY_ORDER: dict[Priority, int] = {
+    Priority.CRITICAL: 4,
+    Priority.HIGH: 3,
+    Priority.MEDIUM: 2,
+    Priority.LOW: 1,
+}
+
+# ---------------------------------------------------------------------------
+# Summary category buckets — defined once at module level
+# ---------------------------------------------------------------------------
+_BUY_CATEGORIES: frozenset[AdviceCategory] = frozenset({AdviceCategory.OPPORTUNITY})
+_SELL_CATEGORIES: frozenset[AdviceCategory] = frozenset({AdviceCategory.RISK})
+_HOLD_CATEGORIES: frozenset[AdviceCategory] = frozenset({AdviceCategory.PERFORMANCE})
+_REBALANCE_CATEGORIES: frozenset[AdviceCategory] = frozenset({AdviceCategory.REBALANCING})
+_DIVERSIFY_CATEGORIES: frozenset[AdviceCategory] = frozenset(
+    {AdviceCategory.DIVERSIFICATION, AdviceCategory.ALLOCATION}
+)
+
+
+class RecommendationGenerator:
+    """Synthesise investment recommendations from pre-computed evaluations.
+
+    Stateless: every ``generate()`` call is self-contained.
+    Safe to share across threads and trivial to unit-test.
+
+    Parameters
+    ----------
+    config:
+        Optional configuration override.  Defaults to
+        ``RecommendationConfig()`` when omitted.
+    """
+
+    def __init__(self, config: RecommendationConfig | None = None) -> None:
+        self._config = config or RecommendationConfig()
+        self._copy_builders: dict[RecommendationType, _CopyBuilder] = {
+            RecommendationType.STRONG_BUY: self._strong_buy_copy,
+            RecommendationType.BUY: self._buy_copy,
+            RecommendationType.REBALANCE: self._rebalance_copy,
+            RecommendationType.REDUCE_RISK: self._reduce_risk_copy,
+            RecommendationType.SELL: self._sell_copy,
+            RecommendationType.STRONG_SELL: self._strong_sell_copy,
+            RecommendationType.MONITOR: self._monitor_copy,
+        }
+
+    # ==========================================================
+    # Public API
+    # ==========================================================
+
+    def generate(
+        self,
+        *,
+        analysis: PortfolioAnalysis,
+        risk: RiskEvaluation,
+        opportunity: OpportunityEvaluation,
+    ) -> RecommendationEvaluation:
+        """Generate a complete ``RecommendationEvaluation``.
+
+        Parameters
+        ----------
+        analysis:
+            Source of truth for portfolio holdings.
+        risk:
+            Output from ``RiskEvaluator``.
+        opportunity:
+            Output from ``OpportunityEvaluator``.
+        """
+
+        logger.info(
+            "recommendation.generation.started",
+            extra={
+                "portfolio_id": analysis.portfolio_id,
+                "holding_count": len(analysis.holdings),
+            },
+        )
+
+        self._validate_inputs(analysis, risk, opportunity)
+
+        context = self._build_context(analysis, risk, opportunity)
+        portfolio_confidence = round(context.confidence_score, 2)
+
+        risk_index: _RiskIndex = {h.symbol: h for h in risk.holding_summary}
+        opportunity_index: _OpportunityIndex = {
+            h.symbol: h for h in opportunity.holding_summary
+        }
+
+        holding_items = self._generate_holding_recommendations(
+            analysis=analysis,
+            context=context,
+            risk_index=risk_index,
+            opportunity_index=opportunity_index,
+        )
+        portfolio_items = self._generate_portfolio_recommendations(
+            context=context,
+            portfolio_confidence=portfolio_confidence,
+        )
+
+        merged = self._deduplicate(self._merge(holding_items, portfolio_items))
+        merged = self._sort_by_priority(merged)[: self._config.max_recommendations]
+
+        summary = self._build_summary(merged)
+        result = self._build_result(
+            context=context,
+            recommendations=merged,
+            risk=risk,
+            opportunity=opportunity,
+            summary=summary,
+            portfolio_confidence=portfolio_confidence,
+        )
+
+        logger.info(
+            "recommendation.generation.completed",
+            extra={
+                "portfolio_id": analysis.portfolio_id,
+                "recommendations_generated": len(merged),
+            },
+        )
+
+        return result
+
+    # ==========================================================
+    # Validation
+    # ==========================================================
+
+    @staticmethod
+    def _validate_inputs(
+        analysis: PortfolioAnalysis,
+        risk: RiskEvaluation,
+        opportunity: OpportunityEvaluation,
+    ) -> None:
+        """Raise ``ValueError`` if any required input is absent or empty."""
+
+        if not analysis.holdings:
+            raise ValueError("PortfolioAnalysis contains no holdings.")
+        if risk is None:
+            raise ValueError("RiskEvaluation cannot be None.")
+        if opportunity is None:
+            raise ValueError("OpportunityEvaluation cannot be None.")
+

@@ -18,12 +18,9 @@ No AI
 
 from __future__ import annotations
 
-from typing import List
-
 from pydantic import BaseModel
 
 from .schemas import WealthProjectionRequest
-
 
 # ---------------------------------------------------------------------
 # Configuration
@@ -49,11 +46,11 @@ MAX_INFLATION = 20
 class ValidationResult(BaseModel):
     valid: bool = True
 
-    warnings: List[str] = []
+    warnings: list[str] = []
 
-    errors: List[str] = []
+    errors: list[str] = []
 
-    advisor_flags: List[str] = []
+    advisor_flags: list[str] = []
 
 
 # ---------------------------------------------------------------------

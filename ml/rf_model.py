@@ -4,7 +4,9 @@ import numpy as np
 import joblib
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(PROJECT_ROOT)
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -22,9 +24,9 @@ from ml.market_relative import (
     compute_live_relative_features, MARKET_RELATIVE_FEATURES,
 )
 
-MODEL_PATH            = "ml/rf_model.pkl"
-CALIBRATED_MODEL_PATH = "ml/rf_model_calibrated.pkl"
-SCALER_PATH           = "ml/scaler.pkl"
+MODEL_PATH = os.path.join(PROJECT_ROOT, "ml", "rf_model.pkl")
+CALIBRATED_MODEL_PATH = os.path.join(PROJECT_ROOT, "ml", "rf_model_calibrated.pkl")
+SCALER_PATH = os.path.join(PROJECT_ROOT, "ml", "scaler.pkl")
 
 # Per-model-type save paths, so training an XGBoost run doesn't clobber the
 # RF artifacts (or vice versa) — each model_type gets its own files.
@@ -32,8 +34,14 @@ SCALER_PATH           = "ml/scaler.pkl"
 # Switching production inference to XGBoost means updating those constants
 # too — that's a separate, deliberate change, not automatic here.
 MODEL_PATHS = {
-    "rf":      {"raw": "ml/rf_model.pkl",     "calibrated": "ml/rf_model_calibrated.pkl"},
-    "xgboost": {"raw": "ml/xgb_model.pkl",    "calibrated": "ml/xgb_model_calibrated.pkl"},
+    "rf": {
+        "raw": MODEL_PATH,
+        "calibrated": CALIBRATED_MODEL_PATH,
+    },
+    "xgboost": {
+        "raw": os.path.join(PROJECT_ROOT, "ml", "xgb_model.pkl"),
+        "calibrated": os.path.join(PROJECT_ROOT, "ml", "xgb_model_calibrated.pkl"),
+    },
 }
 
 FEATURES = [
@@ -474,6 +482,7 @@ def train_model(calibration: str = "prefit", model_type: str = "rf",
     # rf and xgboost runs don't overwrite each other's artifacts.
     raw_path = MODEL_PATHS[model_type]["raw"]
     calibrated_path = MODEL_PATHS[model_type]["calibrated"]
+    os.makedirs(os.path.dirname(raw_path), exist_ok=True)
     joblib.dump(model, raw_path)
     joblib.dump(calibrated_model, calibrated_path)
     joblib.dump(scaler, SCALER_PATH)

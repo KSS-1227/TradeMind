@@ -68,7 +68,7 @@ def remove_subscription(phone: str, symbol: str) -> dict:
     return {"removed": removed}
 
 
-def list_subscriptions(symbol: str = None) -> list:
+def list_subscriptions(symbol: str | None = None) -> list:
     subs = _load()
     if symbol is None:
         return subs
