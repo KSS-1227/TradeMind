@@ -271,83 +271,82 @@ class WhatsAppStockService:
         -------
         Formatted WhatsApp message.
         """
+        raw_input = symbol
+        resolved: str | None = None
 
+        # Stage: stock extraction
         try:
-
-            symbol = self._normalize(symbol)
-
-            logger.info(
-                "Starting WhatsApp analysis for %s",
-                symbol,
+            resolved = self._normalize(symbol)
+        except ValueError:
+            logger.warning(
+                "whatsapp.stage=stock_extraction status=unsupported "
+                "raw_input=%r resolved=None",
+                raw_input,
             )
+            return unsupported_symbol(raw_input)
 
-            analysis = self.analysis_service.analyze(symbol)
+        logger.info(
+            "whatsapp.stage=start symbol=%s",
+            resolved,
+        )
 
-            news = fetch_news(symbol)
+        # Stage: HistoricalService
+        try:
+            analysis = self.analysis_service.analyze(resolved)
+        except Exception:
+            logger.exception(
+                "whatsapp.stage=HistoricalService status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
+            )
+            return internal_error()
 
+        # Stage: Firecrawl
+        try:
+            news = fetch_news(resolved)
             headlines = self._headline_list(news)
+        except Exception:
+            logger.exception(
+                "whatsapp.stage=Firecrawl status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
+            )
+            headlines = []
 
+        # Stage: formatting
+        try:
             payload = self._analysis_dict(analysis)
-
             payload["latest_news"] = headlines
 
             if analysis.ai_report:
-
                 report = analysis.ai_report.model_dump()
-
-                payload["summary"] = report.get(
-                    "summary",
-                    "",
-                )
-
-                payload["strengths"] = report.get(
-                    "strengths",
-                    [],
-                )
-
-                payload["risks"] = report.get(
-                    "risks",
-                    [],
-                )
-
-                payload["ai_recommendation"] = report.get(
-                    "recommendation",
-                    "",
-                )
-
+                payload["summary"] = report.get("summary", "")
+                payload["strengths"] = report.get("strengths", [])
+                payload["risks"] = report.get("risks", [])
+                payload["ai_recommendation"] = report.get("recommendation", "")
             else:
-
                 payload["summary"] = ""
-
                 payload["strengths"] = []
-
                 payload["risks"] = []
-
                 payload["ai_recommendation"] = ""
 
-            logger.info(
-                "Completed WhatsApp analysis for %s",
-                symbol,
-            )
-
-            return stock_analysis(payload)
-
-        except ValueError:
-
-            logger.warning(
-                "Unsupported stock requested: %s",
-                symbol,
-            )
-
-            return unsupported_symbol(symbol)
-
+            result = stock_analysis(payload)
         except Exception:
-
             logger.exception(
-                "WhatsApp stock analysis failed."
+                "whatsapp.stage=formatting status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
             )
-
             return internal_error()
+
+        logger.info(
+            "whatsapp.stage=complete symbol=%s",
+            resolved,
+        )
+        return result
 
     # -----------------------------------------------------
 
@@ -368,34 +367,36 @@ class WhatsAppStockService:
             Google RSS
         """
 
+        raw_input = symbol
+        resolved: str | None = None
+
+        # Stage: stock extraction
         try:
-
-            symbol = self._normalize(symbol)
-
-            logger.info(
-                "Fetching news for %s",
-                symbol,
-            )
-
-            articles = fetch_news(symbol)
-
-            headlines = self._headline_list(articles)
-
-            return latest_news(
-                symbol.replace(".NS", ""),
-                headlines,
-            )
-
+            resolved = self._normalize(symbol)
         except ValueError:
-
-            return unsupported_symbol(symbol)
-
-        except Exception:
-
-            logger.exception(
-                "News fetch failed."
+            logger.warning(
+                "whatsapp.stage=stock_extraction status=unsupported "
+                "raw_input=%r resolved=None",
+                raw_input,
             )
+            return unsupported_symbol(raw_input)
 
+        # Stage: Firecrawl
+        try:
+            logger.info(
+                "whatsapp.stage=Firecrawl status=start symbol=%s",
+                resolved,
+            )
+            articles = fetch_news(resolved)
+            headlines = self._headline_list(articles)
+            return latest_news(resolved.replace(".NS", ""), headlines)
+        except Exception:
+            logger.exception(
+                "whatsapp.stage=Firecrawl status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
+            )
             return internal_error()
 
     # -----------------------------------------------------
@@ -438,17 +439,39 @@ class WhatsAppStockService:
         Technical analysis summary.
         """
 
+        raw_input = symbol
+        resolved: str | None = None
+
+        # Stage: stock extraction
         try:
+            resolved = self._normalize(symbol)
+        except ValueError:
+            logger.warning(
+                "whatsapp.stage=stock_extraction status=unsupported "
+                "raw_input=%r resolved=None",
+                raw_input,
+            )
+            return unsupported_symbol(raw_input)
 
-            symbol = self._normalize(symbol)
+        # Stage: HistoricalService
+        try:
+            analysis = self.analysis_service.analyze(resolved)
+        except Exception:
+            logger.exception(
+                "whatsapp.stage=HistoricalService status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
+            )
+            return internal_error()
 
-            analysis = self.analysis_service.analyze(symbol)
-
+        # Stage: formatting
+        try:
             lines = [
                 "📊 *Technical Analysis*",
                 "━━━━━━━━━━━━━━━━━━",
                 "",
-                f"📈 Stock: {analysis.symbol.replace('.NS','')}",
+                f"📈 Stock: {analysis.symbol.replace('.NS', '')}",
                 "",
                 f"Trend: {analysis.trend}",
                 f"Overall Score: {analysis.overall_score}",
@@ -460,16 +483,16 @@ class WhatsAppStockService:
                 "",
                 "Reasoning",
             ]
-
             for item in analysis.reasoning[:5]:
                 lines.append(f"• {item}")
-
             return "\n".join(lines)
-
         except Exception:
-
-            logger.exception("Technical analysis failed.")
-
+            logger.exception(
+                "whatsapp.stage=formatting status=error "
+                "raw_input=%r symbol=%s",
+                raw_input,
+                resolved,
+            )
             return internal_error()
 
     # -----------------------------------------------------
@@ -482,41 +505,58 @@ class WhatsAppStockService:
         symbol2: str,
     ) -> str:
 
-        try:
+        raw_input = f"{symbol1} vs {symbol2}"
+        s1: str | None = None
+        s2: str | None = None
 
+        # Stage: stock extraction
+        try:
             s1 = self._normalize(symbol1)
             s2 = self._normalize(symbol2)
+        except ValueError:
+            logger.warning(
+                "whatsapp.stage=stock_extraction status=unsupported "
+                "raw_input=%r s1=%r s2=%r",
+                raw_input, s1, s2,
+            )
+            return unsupported_symbol(raw_input)
 
+        # Stage: HistoricalService
+        try:
             a1 = self.analysis_service.analyze(s1)
             a2 = self.analysis_service.analyze(s2)
-
-            better = (
-                a1.symbol
-                if a1.overall_score >= a2.overall_score
-                else a2.symbol
+        except Exception:
+            logger.exception(
+                "whatsapp.stage=HistoricalService status=error "
+                "raw_input=%r s1=%s s2=%s",
+                raw_input, s1, s2,
             )
+            return internal_error()
 
+        # Stage: formatting
+        try:
+            better = (
+                a1.symbol if a1.overall_score >= a2.overall_score else a2.symbol
+            )
             return (
                 "⚖ *TradeMind Comparison*\n"
                 "━━━━━━━━━━━━━━━━━━\n\n"
-
-                f"{a1.symbol.replace('.NS','')}\n"
+                f"{a1.symbol.replace('.NS', '')}\n"
                 f"Signal: {a1.recommendation}\n"
                 f"Score: {a1.overall_score}\n"
                 f"Confidence: {round(a1.confidence)}%\n\n"
-
-                f"{a2.symbol.replace('.NS','')}\n"
+                f"{a2.symbol.replace('.NS', '')}\n"
                 f"Signal: {a2.recommendation}\n"
                 f"Score: {a2.overall_score}\n"
                 f"Confidence: {round(a2.confidence)}%\n\n"
-
-                f"🏆 Better Choice: {better.replace('.NS','')}"
+                f"🏆 Better Choice: {better.replace('.NS', '')}"
             )
-
         except Exception:
-
-            logger.exception("Comparison failed.")
-
+            logger.exception(
+                "whatsapp.stage=formatting status=error "
+                "raw_input=%r s1=%s s2=%s",
+                raw_input, s1, s2,
+            )
             return internal_error()
 
     # -----------------------------------------------------
