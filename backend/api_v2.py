@@ -137,12 +137,9 @@ def signal_full(request: Request, symbol: str):
         service = HistoricalService()
         analysis = service.analyze(sym)
         data = analysis.model_dump()
-        # Flatten explainability sub-keys for frontend convenience
-        expl = data.pop("explainability", {}) or {}
-        data["technical_indicators"] = expl.get("technical_indicators", {})
-        data["risk_metrics"]         = expl.get("risk_metrics", {})
-        data["shap_values"]          = expl.get("shap_values", {})
-        data["available_models"]     = expl.get("available_models", [])
+        # The full-analysis response is the UI contract. Keep nested values
+        # intact so clients do not need legacy aliases or local calculations.
+        data["sentiment"] = data.pop("sentiment_details", {})
         return success(request, data, "Full analysis completed successfully.")
     except ValueError as exc:
         return error(request, status_code=404, code="SYMBOL_NOT_FOUND", message=str(exc))

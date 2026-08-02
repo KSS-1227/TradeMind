@@ -10,9 +10,15 @@ export const fmt = (n) => {
  * Parses confidence percentage strings/numbers into 0-100 integer range
  */
 export const parseConf = (c) => {
-  if (c === undefined || c === null) return 0;
-  const s = c.toString();
-  return s.includes("%") ? parseInt(s, 10) : Math.round(Number(s) * 100);
+  if (c === undefined || c === null || c === "") return null;
+  const text = String(c).trim();
+  if (text.endsWith("%")) {
+    const percentage = Number.parseFloat(text);
+    return Number.isFinite(percentage) ? percentage : null;
+  }
+  const value = Number(text);
+  if (!Number.isFinite(value)) return null;
+  return value >= 0 && value <= 1 ? value * 100 : value;
 };
 
 /**

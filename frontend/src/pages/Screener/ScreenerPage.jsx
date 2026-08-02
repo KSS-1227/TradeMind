@@ -15,6 +15,7 @@ import { ScreenerStockCard } from "../../components/screener/ScreenerStockCard";
 import { STOCKS } from "../../constants/stocks";
 import { fetchFullStockSignal, runScreener } from "../../services/marketService";
 import { isDemoModeEnabled } from "../../utils/demoMode";
+import { parseConf } from "../../utils/formatters";
 import { toast } from "sonner";
 import "../../styles/screener.css";
 
@@ -58,40 +59,7 @@ export function ScreenerPage() {
   const [selectedStockSignal, setSelectedStockSignal] = useState(null);
   const [compareList, setCompareList] = useState([]);
 
-  // Generate sparkline mock data for result cards
-  const generateSparkline = (basePrice) => {
-    const points = [];
-    let p = basePrice || 1000;
-    for (let i = 0; i < 10; i++) {
-      p += (Math.random() - 0.45) * (p * 0.01);
-      points.push({ val: p });
-    }
-    return points;
-  };
-
-  // Normalize a HistoricalAnalysis response into a ScreenerStockCard-compatible shape
-  const normalizeAnalysis = (analysis, sym) => ({
-    symbol: (analysis.symbol || sym).replace(".NS", ""),
-    current_price: analysis.current_price,
-    recommendation: analysis.recommendation,
-    confidence: analysis.confidence,
-    expected_return: analysis.expected_return,
-    predicted_price: analysis.predicted_price,
-    overall_risk: analysis.overall_risk,
-    overall_score: analysis.overall_score,
-    trend: analysis.trend,
-    agreement: analysis.agreement,
-    model_agreement: analysis.model_agreement,
-    sentiment: analysis.sentiment,
-    sector: getSectorForSymbol(analysis.symbol || sym),
-    sparkline: generateSparkline(analysis.current_price),
-    technical_indicators: analysis.technical_indicators || {},
-    risk_metrics: analysis.risk_metrics || {},
-    shap_values: analysis.shap_values || {},
-    reasoning: analysis.reasoning || [],
-    ai_report: analysis.ai_report || null,
-    fullSignal: analysis,
-  });
+  const normalizeAnalysis = (analysis) => analysis;
 
   // Run Screener Query or Fetch Stock Signal
   const executeScreener = useCallback(async (queryStr) => {
@@ -139,7 +107,7 @@ export function ScreenerPage() {
         setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        const cardItem = normalizeAnalysis(analysis, matchedSymbol);
+        const cardItem = normalizeAnalysis(analysis);
         setSelectedStockSignal(analysis);
         setScreenedStocks([cardItem]);
         setViewMode("details");
@@ -157,7 +125,7 @@ export function ScreenerPage() {
               const sym = (m.symbol || "").replace(".NS", "");
               try {
                 const analysis = await fetchFullStockSignal(sym);
-                return normalizeAnalysis(analysis, sym);
+                return normalizeAnalysis(analysis);
               } catch {
                 // Screener match but analysis unavailable — use screener data only
                 return {
@@ -169,7 +137,6 @@ export function ScreenerPage() {
                   predicted_price: null,
                   overall_risk: null,
                   sector: getSectorForSymbol(sym),
-                  sparkline: generateSparkline(m.price || 1000),
                   matched_conditions: m.matched_conditions,
                 };
               }
@@ -232,7 +199,7 @@ export function ScreenerPage() {
     if (filters.sector !== "ALL" && s.sector !== filters.sector) return false;
     if (filters.risk !== "ALL" && !s.overall_risk?.includes(filters.risk)) return false;
     if (filters.rating !== "ALL" && !s.recommendation?.includes(filters.rating)) return false;
-    if (Number(filters.minConfidence) > 0 && Math.round(s.confidence * 100) < Number(filters.minConfidence)) return false;
+    if (Number(filters.minConfidence) > 0 && parseConf(s.confidence) < Number(filters.minConfidence)) return false;
     return true;
   });
 

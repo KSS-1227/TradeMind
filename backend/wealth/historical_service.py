@@ -58,6 +58,11 @@ class HistoricalAnalysis(BaseModel):
     technical_score: float = 0.0
     agreement: str = "unknown"
     model_agreement: bool = False
+    risk: dict[str, Any] = Field(default_factory=dict)
+    technical_indicators: dict[str, Any] = Field(default_factory=dict)
+    shap: dict[str, Any] = Field(default_factory=lambda: {"features": []})
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    sentiment_details: dict[str, Any] = Field(default_factory=dict)
     explainability: dict[str, Any] = Field(default_factory=dict)
     reasoning: list[str] = Field(default_factory=list)
     ai_report: PortfolioAIReport | None = None
@@ -256,6 +261,11 @@ class HistoricalService:
             technical_score=float(rf.get("technical_score", 0.0) or 0.0),
             agreement=fusion.agreement,
             model_agreement=fusion.model_agreement,
+            risk=self._risk_metrics(research_data),
+            technical_indicators=self._technical_indicators(research_data),
+            history=self._history(research_data),
+            sentiment_details=dict(sentiment),
+            shap=self._shap_features(symbol, fusion.recommendation),
             explainability=dict(fusion.explainability),
             reasoning=list(fusion.reasoning),
         )
@@ -285,6 +295,59 @@ class HistoricalService:
             )
 
         return analysis
+
+    @staticmethod
+    def _risk_metrics(research_data: Mapping[str, Any]) -> dict[str, Any]:
+        """Expose the backend's canonical risk values for the full response."""
+        frame = research_data.get("df")
+        if frame is None or frame.empty or "Close" not in frame:
+            return {}
+        close = frame["Close"].astype(float)
+        returns = close.pct_change().dropna()
+        if returns.empty:
+            return {}
+        deviation = returns.std()
+        sharpe = float(returns.mean() / deviation * (252 ** 0.5)) if deviation else 0.0
+        drawdown = (close - close.cummax()) / close.cummax()
+        import numpy as np
+        return {
+            "sharpe": round(sharpe, 3),
+            "drawdown": f"{round(float(drawdown.min()) * 100, 2)}%",
+            "var": f"{round(float(np.percentile(returns, 5)) * 100, 2)}%",
+        }
+
+    @staticmethod
+    def _technical_indicators(research_data: Mapping[str, Any]) -> dict[str, Any]:
+        latest = research_data.get("latest", {})
+        fields = {"rsi": "RSI", "macd": "MACD", "ema_20": "EMA_20", "ema_50": "EMA_50", "volume": "Volume"}
+        return {name: latest[source] for name, source in fields.items() if latest.get(source) is not None}
+
+    @staticmethod
+    def _history(research_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+        frame = research_data.get("df")
+        if frame is None or frame.empty or "Close" not in frame:
+            return []
+        return [
+            {"Date": str(index)[:10], "Close": round(float(row["Close"]), 2)}
+            for index, row in frame.tail(90).iterrows()
+        ]
+
+    @staticmethod
+    def _shap_features(symbol: str, recommendation: str) -> dict[str, Any]:
+        """Return the explainer's SHAP features in the full-response contract."""
+        try:
+            from ml.explain import explain_signal
+
+            explanation = explain_signal(symbol, recommendation)
+            return {
+                "features": [
+                    {"name": name, "value": value}
+                    for name, value in explanation.get("top_features", [])
+                ],
+            }
+        except Exception:
+            logger.exception("full_analysis_shap_unavailable", extra={"ticker": symbol})
+            return {"features": []}
 
     @staticmethod
     def _default_research_provider() -> ResearchProvider:

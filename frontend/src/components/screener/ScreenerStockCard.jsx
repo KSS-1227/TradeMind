@@ -15,6 +15,7 @@ import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { Typography } from "../ui/Typography";
 import { STOCK_LABELS } from "../../constants/stocks";
+import { parseConf } from "../../utils/formatters";
 
 export function ScreenerStockCard({
   stock,
@@ -24,7 +25,7 @@ export function ScreenerStockCard({
 }) {
   const [showShap, setShowShap] = useState(false);
 
-  const confPct = stock.confidence != null ? Math.round(stock.confidence * 100) : null;
+  const confPct = parseConf(stock.confidence);
   const signal_label = stock.recommendation || "—";
   const targetPrice = stock.predicted_price ?? null;
   const expectedReturn = stock.expected_return ?? null;
@@ -34,16 +35,10 @@ export function ScreenerStockCard({
   const tech = stock.technical_indicators || {};
 
   // Model agreement from backend
-  const modelAgreement = stock.models || null;
+  const modelAgreement = stock.explainability?.available_models || null;
 
   // SHAP drivers from backend reasoning
-  const shapDrivers = stock.shap_values
-    ? Object.entries(stock.shap_values).map(([feature, impact]) => ({
-        feature,
-        impact: impact > 0 ? `+${(impact * 100).toFixed(1)}%` : `${(impact * 100).toFixed(1)}%`,
-        type: impact >= 0 ? "positive" : "negative",
-      }))
-    : (stock.reasoning || []).map((r) => ({ feature: r, impact: null, type: "positive" }));
+  const shapDrivers = stock.shap?.features || [];
 
   return (
     <Card
@@ -211,7 +206,7 @@ export function ScreenerStockCard({
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
           {modelAgreement
-            ? modelAgreement.map((m, idx) => (
+            ? modelAgreement.map((model, idx) => (
             <div
               key={idx}
               style={{
@@ -228,8 +223,7 @@ export function ScreenerStockCard({
               }}
             >
               <Check size={11} color="var(--color-teal)" />
-              <span style={{ color: "var(--text-muted)" }}>{m.name}:</span>
-              <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{m.signal}</span>
+              <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{model}</span>
             </div>
           ))
             : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Model data unavailable</span>
@@ -360,13 +354,13 @@ export function ScreenerStockCard({
       </div>
 
       {/* Mini Recharts Sparkline */}
-      {stock.sparkline && (
+      {stock.history?.length > 0 && (
         <div style={{ height: "32px", width: "100%" }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={stock.sparkline}>
+            <AreaChart data={stock.history}>
               <Area
                 type="monotone"
-                dataKey="val"
+                dataKey="Close"
                 stroke="var(--color-teal)"
                 strokeWidth={1.5}
                 fill="rgba(0, 201, 167, 0.12)"
@@ -435,16 +429,16 @@ export function ScreenerStockCard({
                 {shapDrivers.length > 0
                   ? shapDrivers.map((driver, idx) => (
                   <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
-                    <span style={{ color: "var(--text-secondary)" }}>{driver.feature}</span>
-                    {driver.impact != null && (
+                    <span style={{ color: "var(--text-secondary)" }}>{driver.name}</span>
+                    {driver.value != null && (
                     <span
                       style={{
                         fontWeight: 700,
                         fontFamily: "var(--font-mono)",
-                        color: driver.type === "positive" ? "var(--success)" : "var(--danger)",
+                        color: "var(--text-primary)",
                       }}
                     >
-                      {driver.impact}
+                      {driver.value}
                     </span>
                     )}
                   </div>

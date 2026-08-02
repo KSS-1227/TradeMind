@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
@@ -6,30 +6,19 @@ import { Tabs } from "../ui/Tabs";
 import { MetricCard } from "../ui/MetricCard";
 import { PriceAreaChart } from "../charts/PriceAreaChart";
 import { parseConf } from "../../utils/formatters";
-import { fetchStockPrices } from "../../services/marketService";
 import { SIGNAL_COLORS } from "../../constants/stocks";
 import { Sparkles, Brain, AlertTriangle, Activity } from "lucide-react";
 
 export function SignalCard({ signal, isMobile }) {
   const [tab, setTab] = useState("signal");
-  const [prices, setPrices] = useState([]);
 
   const sigColor = SIGNAL_COLORS[signal.recommendation?.toUpperCase()] || SIGNAL_COLORS.HOLD;
   const conf = parseConf(signal.confidence);
-
-  useEffect(() => {
-    let isMounted = true;
-    const sym = signal.symbol?.replace(".NS", "") || "";
-    if (sym) {
-      fetchStockPrices(sym)
-        .then((r) => {
-          const d = r.data || r;
-          if (isMounted) setPrices(Array.isArray(d) ? d : []);
-        })
-        .catch(() => {});
-    }
-    return () => { isMounted = false; };
-  }, [signal.symbol]);
+  const risk = signal.risk;
+  const sentiment = signal.sentiment;
+  const technicalIndicators = signal.technical_indicators;
+  const shapFeatures = signal.shap?.features;
+  const history = signal.history;
 
   const tabsConfig = [
     { id: "signal",    label: "SHAP Explanation" },
@@ -43,7 +32,7 @@ export function SignalCard({ signal, isMobile }) {
     HOLD:      { ring: "rgba(245,158,11,0.25)", glow: "rgba(245,158,11,0.08)" },
     ACCUMULATE:{ ring: "rgba(0,201,167,0.25)",  glow: "rgba(0,201,167,0.08)" },
   };
-  const sc = signalColors[signal.signal?.toUpperCase()] || signalColors.HOLD;
+  const sc = signalColors[signal.recommendation?.toUpperCase()] || signalColors.HOLD;
 
   return (
     <motion.div
@@ -95,11 +84,11 @@ export function SignalCard({ signal, isMobile }) {
                 marginBottom: 4,
               }}
             >
-              ₹{(signal.current_price ?? signal.price)?.toLocaleString("en-IN")}
+              {signal.current_price == null ? "—" : `₹${Number(signal.current_price).toLocaleString("en-IN")}`}
             </div>
 
             <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
-              {signal.timestamp}
+              {signal.as_of ?? ""}
             </div>
           </div>
 
@@ -131,7 +120,7 @@ export function SignalCard({ signal, isMobile }) {
               >
                 <motion.div
                   initial={{ width: 0 }}
-                  animate={{ width: `${conf}%` }}
+                  animate={{ width: `${conf ?? 0}%` }}
                   transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.2 }}
                   style={{
                     height: "100%",
@@ -150,7 +139,7 @@ export function SignalCard({ signal, isMobile }) {
                   marginTop: 3,
                 }}
               >
-                {conf}%
+                {conf == null ? "—" : `${conf}%`}
               </div>
             </div>
           </div>
@@ -161,19 +150,19 @@ export function SignalCard({ signal, isMobile }) {
       <div className="grid-3" style={{ marginBottom: "14px" }}>
         <MetricCard
           label="Sharpe Ratio"
-          value={signal.risk_metrics?.sharpe ?? signal.risk?.sharpe ?? "—"}
+          value={risk?.sharpe ?? "—"}
           color="var(--color-teal)"
           sub="Risk-adjusted return"
         />
         <MetricCard
           label="Max Drawdown"
-          value={signal.risk_metrics?.drawdown ?? signal.risk?.drawdown ?? "—"}
+          value={risk?.drawdown ?? "—"}
           color="var(--danger)"
           sub="Peak-to-trough"
         />
         <MetricCard
           label="VaR 95%"
-          value={signal.risk_metrics?.var ?? signal.risk?.var ?? "—"}
+          value={risk?.var ?? "—"}
           color="var(--color-gold)"
           sub="Value at Risk"
         />
@@ -212,7 +201,7 @@ export function SignalCard({ signal, isMobile }) {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {(signal.reasoning ?? signal.reasons)?.map((r, i) => (
+                {shapFeatures?.map((feature, i) => (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, x: -8 }}
@@ -232,12 +221,12 @@ export function SignalCard({ signal, isMobile }) {
                     >
                       {i + 1}.
                     </span>
-                    <span>{r}</span>
+                    <span>{feature.name}: {feature.value}</span>
                   </motion.div>
                 ))}
               </div>
 
-              {(signal.risk_metrics?.note ?? signal.risk?.note) && (
+              {risk?.note && (
                 <div
                   style={{
                     marginTop: 14,
@@ -253,7 +242,17 @@ export function SignalCard({ signal, isMobile }) {
                   }}
                 >
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  {signal.risk_metrics?.note ?? signal.risk?.note}
+                  {risk.note}
+                </div>
+              )}
+
+              {technicalIndicators && (
+                <div style={{ marginTop: 14, display: "flex", flexWrap: "wrap", gap: 8, fontSize: 12 }}>
+                  {Object.entries(technicalIndicators).map(([name, value]) => (
+                    <span key={name} className="mono" style={{ color: "var(--text-secondary)" }}>
+                      {name}: {value}
+                    </span>
+                  ))}
                 </div>
               )}
             </Card>
@@ -295,7 +294,7 @@ export function SignalCard({ signal, isMobile }) {
                   ● LIVE
                 </span>
               </div>
-              <PriceAreaChart prices={prices} isMobile={isMobile} />
+              <PriceAreaChart prices={history ?? []} isMobile={isMobile} />
             </Card>
           </motion.div>
         )}
@@ -327,14 +326,14 @@ export function SignalCard({ signal, isMobile }) {
               </div>
 
               <div style={{ display: "flex", gap: 10 }}>
-                {Object.entries(signal.sentiment?.scores || signal.sentiment_scores || {}).map(([k, v]) => {
+                {Object.entries(sentiment?.scores ?? {}).map(([k, v]) => {
                   const colorMap = {
                     positive: "var(--success)",
                     negative: "var(--danger)",
                     neutral:  "var(--warning)",
                   };
                   const color = colorMap[k] || "var(--text-muted)";
-                  const pct = Math.round(v * 100);
+                  const pct = parseConf(v);
 
                   return (
                     <div
@@ -357,7 +356,7 @@ export function SignalCard({ signal, isMobile }) {
                           lineHeight: 1.1,
                         }}
                       >
-                        {pct}%
+                        {pct == null ? "—" : `${pct}%`}
                       </div>
                       <div
                         style={{
@@ -382,7 +381,7 @@ export function SignalCard({ signal, isMobile }) {
                       >
                         <motion.div
                           initial={{ width: 0 }}
-                          animate={{ width: `${pct}%` }}
+                          animate={{ width: `${pct ?? 0}%` }}
                           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
                           style={{ height: "100%", background: color, borderRadius: 99 }}
                         />
