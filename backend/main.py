@@ -338,6 +338,11 @@ def analyze_portfolio(request: PortfolioAnalyzeRequest):
     return {"holdings": results, "count": len(results)}
 
 
+class WhatsAppSubscribeRequest(BaseModel):
+    phone: str    # E.164 format, e.g. "+919876543210"
+    symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
+
+
 # Per-sender WhatsApp sessions (in-process, resets on restart)
 _whatsapp_sessions: dict[str, WhatsAppSession] = {}
 _whatsapp_service = WhatsAppStockService()
