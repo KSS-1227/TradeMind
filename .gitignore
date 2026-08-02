@@ -18,4 +18,6 @@ ml/scaler.pkl
 .vercel
 ml/rf_calibrated.pkl
 ml/lstm_model.pt
+ml/lstm_scaler.pkl
+ml/lstm_temperature.pkl
 frontend.zip 

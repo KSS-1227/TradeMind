@@ -24,3 +24,4 @@ feedparser
 torch>=2.0,<3.0
 langchain>=1.0
 langchain-openai>=0.2
+huggingface_hub>=0.24.0

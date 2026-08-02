@@ -24,13 +24,17 @@ def ensure_model_exists():
         logger.info("startup.model_ready")
 
     if not os.path.exists(LSTM_PATH):
-        logger.info("startup.lstm_model_missing — training now")
-        try:
-            from ml.lstm_model import train_lstm_model
-            train_lstm_model(save=True)
-            logger.info("startup.lstm_model_trained")
-        except Exception as exc:
-            logger.warning("startup.lstm_training_failed — %s", exc)
+        logger.info("startup.lstm_model_missing — downloading from Hugging Face Model Hub")
+        from huggingface_hub import hf_hub_download
+        ml_dir = os.path.join(PROJECT_ROOT, "ml")
+        for filename in ("lstm_model.pt", "lstm_scaler.pkl", "lstm_temperature.pkl"):
+            hf_hub_download(
+                repo_id="KSS-1227/trademind-lstm",
+                filename=filename,
+                local_dir=ml_dir,
+                local_dir_use_symlinks=False,
+            )
+        logger.info("startup.lstm_models_downloaded")
 
 
 if __name__ == "__main__":
