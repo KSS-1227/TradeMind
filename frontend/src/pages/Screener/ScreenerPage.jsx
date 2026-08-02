@@ -128,21 +128,15 @@ export function ScreenerPage() {
                 return normalizeAnalysis(analysis);
               } catch {
                 // Screener match but analysis unavailable — use screener data only
-                return {
-                  symbol: sym,
-                  current_price: m.price || null,
-                  recommendation: null,
-                  confidence: null,
-                  expected_return: null,
-                  predicted_price: null,
-                  overall_risk: null,
-                  sector: getSectorForSymbol(sym),
-                  matched_conditions: m.matched_conditions,
-                };
+                return null;
               }
             })
           );
-          setScreenedStocks(cards);
+          const fullAnalysisCards = cards.filter(Boolean);
+          setScreenedStocks(fullAnalysisCards);
+          if (fullAnalysisCards.length < matches.length) {
+            toast.warning(`${matches.length - fullAnalysisCards.length} match(es) could not be fully analyzed and were omitted.`);
+          }
         } else {
           setScreenedStocks([]);
         }
@@ -161,17 +155,6 @@ export function ScreenerPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery, searchHistory]);
-
-  const getSectorForSymbol = (sym = "") => {
-    const s = sym.toUpperCase();
-    if (s.includes("RELIANCE")) return "Energy";
-    if (s.includes("TCS") || s.includes("INFY")) return "IT & Tech";
-    if (s.includes("HDFC") || s.includes("ICICI")) return "Banking & Fin";
-    if (s.includes("TATAMOTORS")) return "Automotive";
-    if (s.includes("GOLD") || s.includes("GC=F")) return "Commodities";
-    return "Energy";
-  };
-
 
   // Initial load
   useEffect(() => {

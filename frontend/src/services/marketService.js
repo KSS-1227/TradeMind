@@ -5,7 +5,7 @@ import { ENDPOINTS } from "../constants/api";
 const unwrapV2 = (response) => response.data?.data ?? response.data;
 
 export const fetchFullStockSignal = async (symbol) => {
-  const response = await apiClient.get(ENDPOINTS.V2_SIGNAL_FULL(symbol));
+  const response = await apiClient.get(ENDPOINTS.V2_SIGNAL_FULL(symbol), { timeout: 120000 });
   return unwrapV2(response);
 };
 
@@ -112,4 +112,3 @@ export const analyzeScamMessage = async (payload) => {
     throw err;
   }
 };
-

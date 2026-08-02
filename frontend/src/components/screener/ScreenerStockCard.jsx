@@ -14,7 +14,6 @@ import {
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { Typography } from "../ui/Typography";
-import { STOCK_LABELS } from "../../constants/stocks";
 import { parseConf } from "../../utils/formatters";
 
 export function ScreenerStockCard({
@@ -26,19 +25,20 @@ export function ScreenerStockCard({
   const [showShap, setShowShap] = useState(false);
 
   const confPct = parseConf(stock.confidence);
-  const signal_label = stock.recommendation || "—";
+  const signal_label = stock.recommendation ?? "N/A";
   const targetPrice = stock.predicted_price ?? null;
   const expectedReturn = stock.expected_return ?? null;
-  const riskLevel = stock.overall_risk || "—";
+  const riskLevel = stock.overall_risk ?? "N/A";
 
   // Technical indicators from backend explainability
-  const tech = stock.technical_indicators || {};
+  const tech = stock.technical_indicators ?? {};
 
   // Model agreement from backend
-  const modelAgreement = stock.explainability?.available_models || null;
+  const modelAgreement = stock.explainability?.available_models;
+  const hasModelAgreement = Array.isArray(modelAgreement) && modelAgreement.length > 0;
 
   // SHAP drivers from backend reasoning
-  const shapDrivers = stock.shap?.features || [];
+  const shapDrivers = stock.shap?.features ?? [];
 
   return (
     <Card
@@ -93,12 +93,12 @@ export function ScreenerStockCard({
                 color: "var(--text-muted)",
               }}
             >
-              {stock.sector || "NSE INDIA"}
+              {stock.sector ?? "N/A"}
             </span>
           </div>
 
           <Typography variant="caption" style={{ color: "var(--text-muted)", fontSize: "12px" }}>
-            {STOCK_LABELS[stock.symbol] || STOCK_LABELS[stock.symbol + ".NS"] || "Equities / Spot"}
+            {stock.trend ?? "N/A"}
           </Typography>
         </div>
 
@@ -131,7 +131,9 @@ export function ScreenerStockCard({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-          ₹<CountUp end={stock.current_price || 0} decimals={2} duration={1.2} separator="," />
+          {stock.current_price != null
+            ? <>₹<CountUp end={stock.current_price} decimals={2} duration={1.2} separator="," /></>
+            : "N/A"}
           </div>
         </div>
 
@@ -150,7 +152,7 @@ export function ScreenerStockCard({
           >
           {targetPrice != null
             ? <>₹<CountUp end={targetPrice} duration={1.2} separator="," /></>
-            : <span style={{ color: "var(--text-muted)" }}>—</span>
+            : <span style={{ color: "var(--text-muted)" }}>N/A</span>
           }
           </div>
         </div>
@@ -165,7 +167,7 @@ export function ScreenerStockCard({
           </div>
 
           <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>
-            {confPct != null ? <><CountUp end={confPct} duration={1.2} />%</> : "—"}
+            {confPct != null ? <><CountUp end={confPct} duration={1.2} />%</> : "N/A"}
           </div>
         </div>
 
@@ -205,7 +207,7 @@ export function ScreenerStockCard({
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-          {modelAgreement
+          {hasModelAgreement
             ? modelAgreement.map((model, idx) => (
             <div
               key={idx}
@@ -226,9 +228,12 @@ export function ScreenerStockCard({
               <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{model}</span>
             </div>
           ))
-            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Model data unavailable</span>
+            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>{stock.agreement ?? "N/A"}</span>
           }
         </div>
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Model agreement: {stock.model_agreement == null ? "N/A" : String(stock.model_agreement)}
+        </span>
       </div>
 
       {/* ================= Requirement 7: EXPECTED RETURN, TARGET & RISK CARDS ================= */}
@@ -254,7 +259,7 @@ export function ScreenerStockCard({
           <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--success)", fontFamily: "var(--font-mono)", marginTop: "2px" }}>
             {expectedReturn != null
               ? <><span>+</span><CountUp end={expectedReturn} decimals={1} duration={1.2} />%</>
-              : "—"
+              : "N/A"
             }
           </div>
         </div>
@@ -274,7 +279,7 @@ export function ScreenerStockCard({
           <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--color-teal)", fontFamily: "var(--font-mono)", marginTop: "2px" }}>
             {targetPrice != null
               ? <>₹<CountUp end={targetPrice} duration={1.2} /></>
-              : "—"
+              : "N/A"
             }
           </div>
         </div>
@@ -314,7 +319,7 @@ export function ScreenerStockCard({
               marginTop: "4px",
             }}
           >
-            {riskLevel !== "—" ? `${riskLevel} RISK` : "—"}
+            {riskLevel === "N/A" ? "N/A" : `${riskLevel} RISK`}
           </div>
         </div>
       </div>
@@ -334,22 +339,22 @@ export function ScreenerStockCard({
       >
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>RSI (14):</span>
-        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.rsi || "—"}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.rsi ?? "N/A"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>MACD:</span>
-        <span style={{ fontWeight: 700, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>{tech.macd || "—"}</span>
+        <span style={{ fontWeight: 700, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>{tech.macd ?? "N/A"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>50 EMA:</span>
-        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.ema || "—"}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.ema_50 ?? "N/A"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>Volume:</span>
-        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.volume || "—"}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.volume ?? "N/A"}</span>
         </div>
       </div>
 
@@ -443,7 +448,7 @@ export function ScreenerStockCard({
                     )}
                   </div>
                 ))
-                  : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No SHAP data available</span>
+                  : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>N/A</span>
                 }
               </div>
             </motion.div>
