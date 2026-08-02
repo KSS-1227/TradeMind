@@ -249,36 +249,6 @@ class WhatsAppStockService:
 
         return is_supported(message)
 
-    def process_message(
-        self,
-        sender: str,
-        text: str,
-        session: WhatsAppSession,
-    ) -> str:
-        """
-        Route an incoming WhatsApp message
-        to the correct handler and update
-        the session's last known symbol.
-        """
-
-        command = text.strip().upper()
-
-        if command == "HELP":
-            return self.help()
-
-        if command == "NEWS":
-            if not session.last_symbol:
-                return "Send a stock symbol first, then NEWS."
-            return self.latest_stock_news(session.last_symbol)
-
-        resolved = normalize_symbol(command)
-
-        if resolved:
-            session.last_symbol = resolved
-            return self.analyze_stock(resolved)
-
-        return unsupported_symbol(command)
-
     # -----------------------------------------------------
     # HistoricalService + Firecrawl
     # -----------------------------------------------------

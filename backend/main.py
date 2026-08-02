@@ -368,14 +368,10 @@ async def whatsapp_webhook(request: Request):
         return JSONResponse(status_code=400, content={"detail": "Missing From or Body"})
 
     session = _whatsapp_sessions.setdefault(sender, WhatsAppSession())
-    reply = _whatsapp_service.process_message(sender, text, session)
+    reply = _whatsapp_service.process_message(text, session)
     send_whatsapp_message(sender, reply)
     return {"status": "ok"}
 
-
-
-    phone: str    # E.164 format, e.g. "+919876543210"
-    symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
 
 @app.post("/whatsapp/subscribe")
 def whatsapp_subscribe(request: WhatsAppSubscribeRequest):
