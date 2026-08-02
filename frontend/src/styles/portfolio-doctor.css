@@ -1,0 +1,208 @@
+/* Portfolio Doctor Flagship Styling — Apple Intelligence & Stripe/Bloomberg Aesthetics */
+
+.pd-hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: var(--radius-pill, 9999px);
+  background: linear-gradient(135deg, rgba(0, 201, 167, 0.15) 0%, rgba(59, 130, 246, 0.15) 100%);
+  border: 1px solid rgba(0, 201, 167, 0.3);
+  color: var(--color-teal);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.pd-hero-title {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  background: linear-gradient(135deg, #FFFFFF 0%, #CBD5E1 50%, #94A3B8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+
+@media (min-width: 768px) {
+  .pd-hero-title {
+    font-size: 44px;
+  }
+}
+
+.pd-hero-subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 640px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+/* Sample Portfolio Pills */
+.pd-sample-pill {
+  padding: 6px 12px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pd-sample-pill:hover {
+  background: var(--bg-elevated);
+  border-color: var(--color-teal);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+/* Dropzone for CSV */
+.pd-dropzone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg, 16px);
+  padding: 24px 16px;
+  text-align: center;
+  background: rgba(18, 27, 45, 0.4);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.pd-dropzone:hover {
+  border-color: var(--color-teal);
+  background: rgba(0, 201, 167, 0.04);
+}
+
+/* Metric Cards Grid */
+.pd-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+@media (min-width: 640px) {
+  .pd-metrics-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .pd-metrics-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* Report Header & Score Panel */
+.pd-score-card {
+  background: linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius-lg, 16px);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.pd-score-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle at center, rgba(0, 201, 167, 0.08) 0%, transparent 60%);
+  pointer-events: none;
+}
+
+/* Table Responsive Container */
+.pd-table-container {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg, 16px);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.pd-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.pd-table th {
+  padding: 12px 16px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.pd-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+.pd-table tr:last-child td {
+  border-bottom: none;
+}
+
+.pd-table tr.expanded-row td {
+  background: rgba(24, 36, 60, 0.6);
+  padding: 16px;
+}
+
+/* Insight Cards Grid */
+.pd-insights-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .pd-insights-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Recommendations Grid */
+.pd-recs-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+@media (min-width: 768px) {
+  .pd-recs-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Charts Grid */
+.pd-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+@media (min-width: 1024px) {
+  .pd-charts-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

@@ -192,6 +192,7 @@ def portfolio_analyze(request: Request, payload: PortfolioAnalyzeRequest):
                 "agreement": analysis.agreement,
                 "model_agreement": analysis.model_agreement,
                 "reasoning": analysis.reasoning[:3],
+                "ai_report": analysis.ai_report.model_dump() if analysis.ai_report else None,
                 "status": "analyzed",
             })
         except (ValueError, RuntimeError, OSError):

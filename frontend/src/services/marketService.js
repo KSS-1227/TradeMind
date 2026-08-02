@@ -79,3 +79,32 @@ export const calculateWealthProjection = async (payload) => {
     throw err;
   }
 };
+
+export const analyzePortfolio = async (holdings) => {
+  try {
+    const response = await apiClient.post(ENDPOINTS.V2_PORTFOLIO_ANALYZE, { holdings });
+    return response.data;
+  } catch (err) {
+    if (err.status === 404) {
+      const fallback = await apiClient.post(ENDPOINTS.PORTFOLIO_ANALYZE, { holdings });
+      return fallback.data;
+    }
+    throw err;
+  }
+};
+
+export const analyzeScamMessage = async (payload) => {
+  // payload: { message, stock_symbol?, source? }
+  try {
+    const response = await apiClient.post(ENDPOINTS.V2_SCAM_ANALYZE, payload);
+    return response.data;
+  } catch (err) {
+    if (err.status === 404) {
+      const fallback = await apiClient.post(ENDPOINTS.SCAM_ANALYZE, payload);
+      return fallback.data;
+    }
+    throw err;
+  }
+};
+
+

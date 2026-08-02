@@ -17,6 +17,7 @@ import AuthPage from "./pages/Auth/AuthPage";
 
 import "./styles/theme.css";
 import "./styles/layout.css";
+import "./styles/premium-polish.css";
 
 function ProtectedRoute() {
   const { isAuthenticated, loading } = useAuth();
@@ -27,14 +28,26 @@ function ProtectedRoute() {
         style={{
           minHeight: "100vh",
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           background: "var(--bg-primary)",
-          color: "var(--text-muted)",
-          fontSize: "14px",
+          gap: 16,
         }}
       >
-        Initializing TradeMind...
+        <div
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            border: "2px solid var(--color-teal-border)",
+            borderTopColor: "var(--color-teal)",
+            animation: "premiumSpin 0.9s linear infinite",
+          }}
+        />
+        <div style={{ fontSize: 12, color: "var(--text-muted)", fontWeight: 600, letterSpacing: "0.8px" }}>
+          INITIALIZING TRADEMIND AI
+        </div>
       </div>
     );
   }

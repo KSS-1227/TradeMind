@@ -1,0 +1,128 @@
+/* AI Stock Screener Flagship Styling — TradingView, Bloomberg & Perplexity Aesthetic */
+
+/* Screener Hero Header */
+.sc-hero-header {
+  margin-bottom: 24px;
+}
+
+.sc-hero-title {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  background: linear-gradient(135deg, #FFFFFF 0%, #38BDF8 50%, #3B82F6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+
+@media (min-width: 768px) {
+  .sc-hero-title {
+    font-size: 44px;
+  }
+}
+
+.sc-hero-subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 680px;
+  margin-bottom: 20px;
+  line-height: 1.6;
+}
+
+/* Filter Controls Bar */
+.sc-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px);
+}
+
+.sc-filter-chip {
+  padding: 6px 12px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sc-filter-chip.active {
+  background: var(--color-teal-bg, rgba(0, 201, 167, 0.15));
+  border-color: var(--color-teal);
+  color: var(--color-teal);
+}
+
+/* Stock Cards Grid */
+.sc-cards-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+@media (min-width: 640px) {
+  .sc-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .sc-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.sc-stock-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px);
+  padding: 18px;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.sc-stock-card:hover {
+  border-color: var(--color-teal);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-hover);
+}
+
+.sc-stock-card.selected {
+  border-color: var(--color-teal);
+  box-shadow: 0 0 0 2px var(--color-teal-border);
+}
+
+/* Compare Table Overlay / Drawer */
+.sc-compare-panel {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 16px);
+  padding: 24px;
+  margin-bottom: 28px;
+}
+
+/* Technical Indicator Badges */
+.sc-indicator-pill {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}

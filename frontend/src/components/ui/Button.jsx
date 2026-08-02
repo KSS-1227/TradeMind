@@ -113,6 +113,8 @@ export function Button({
       whileTap={disabled || loading ? undefined : { scale: 0.98 }}
       className={`ui-btn btn-${variant} ${className}`.trim()}
       disabled={disabled || loading}
+      aria-disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...props}
     >
       {loading ? (

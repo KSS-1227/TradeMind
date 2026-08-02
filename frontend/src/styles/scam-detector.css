@@ -1,0 +1,195 @@
+/* AI Scam Detector Flagship Styling — ChatGPT + Apple Intelligence + VirusTotal + Bloomberg Aesthetic */
+
+/* Scanner Hero Badge */
+.sd-hero-shield {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(245, 158, 11, 0.2) 100%);
+  border: 1.5px solid rgba(239, 68, 68, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--danger, #EF4444);
+  margin-bottom: 16px;
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.25);
+  animation: pulseScanner 3s infinite ease-in-out;
+}
+
+@keyframes pulseScanner {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(239, 68, 68, 0.45);
+    transform: scale(1.05);
+  }
+}
+
+.sd-hero-title {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  background: linear-gradient(135deg, #FFFFFF 0%, #F87171 50%, #EF4444 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+
+@media (min-width: 768px) {
+  .sd-hero-title {
+    font-size: 44px;
+  }
+}
+
+.sd-hero-subtitle {
+  font-size: 15px;
+  color: var(--text-secondary);
+  max-width: 640px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+/* Sample Presets */
+.sd-preset-pill {
+  padding: 6px 12px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sd-preset-pill:hover {
+  background: var(--bg-elevated);
+  border-color: var(--danger);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+}
+
+/* Evidence Chips Grid */
+.sd-chips-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-hover);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+}
+
+.sd-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.sd-chip.chip-critical {
+  border-color: rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.1);
+  color: #F87171;
+}
+
+.sd-chip.chip-warning {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.1);
+  color: #FBBF24;
+}
+
+.sd-chip.chip-info {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60A5FA;
+}
+
+/* AI Explanation ChatGPT/Apple Intelligence Glass Card */
+.sd-ai-card {
+  background: linear-gradient(135deg, rgba(18, 27, 45, 0.9) 0%, rgba(24, 36, 60, 0.9) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-lg, 16px);
+  padding: 24px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.sd-ai-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #EF4444, #F59E0B, #00C9A7, #3B82F6);
+}
+
+/* Vertical Timeline */
+.sd-timeline {
+  position: relative;
+  padding-left: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.sd-timeline::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--border);
+}
+
+.sd-timeline-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.sd-timeline-dot {
+  position: absolute;
+  left: -28px;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  border: 2px solid var(--color-teal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Actions Grid */
+.sd-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 768px) {
+  .sd-actions-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

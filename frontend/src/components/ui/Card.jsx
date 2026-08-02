@@ -1,14 +1,15 @@
 import React from "react";
 import { motion } from "framer-motion";
 
-/* Base Card with Motion Hover Lift */
+/* ── Base Card ── */
 export function Card({
   children,
-  variant = "default", // default | glass | dashboard | chart | action | feature
+  variant = "default",  // default | glass | dashboard | chart | action | feature
   className = "",
   style = {},
   onClick,
   hoverLift = true,
+  accent,               // optional accent colour string e.g. "var(--color-teal)"
   ...props
 }) {
   const getVariantStyles = () => {
@@ -16,17 +17,17 @@ export function Card({
       case "glass":
         return {
           background: "var(--bg-glass)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          border: "1px solid rgba(255, 255, 255, 0.08)",
-          boxShadow: "var(--shadow-glass)",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          border: "1px solid rgba(255, 255, 255, 0.07)",
+          boxShadow: "var(--shadow-glass), inset 0 1px 0 rgba(255,255,255,0.06)",
         };
       case "dashboard":
         return {
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-card)",
-          boxShadow: "var(--shadow-md)",
+          boxShadow: "var(--shadow-card)",
         };
       case "chart":
         return {
@@ -37,16 +38,18 @@ export function Card({
         };
       case "action":
         return {
-          background: "var(--bg-elevated)",
+          background: "linear-gradient(135deg, var(--bg-elevated) 0%, var(--bg-surface) 100%)",
           border: "1px solid var(--border-hover)",
           borderRadius: "var(--radius-card)",
           cursor: "pointer",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
         };
       case "feature":
         return {
           background: "linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%)",
           border: "1px solid var(--border-hover)",
           borderRadius: "var(--radius-card)",
+          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
         };
       case "default":
       default:
@@ -54,14 +57,19 @@ export function Card({
           background: "var(--bg-surface)",
           border: "1px solid var(--border)",
           borderRadius: "var(--radius-card)",
+          boxShadow: "var(--shadow-card)",
         };
     }
   };
 
+  const isInteractive = onClick || variant === "action" || variant === "feature";
+
   const baseStyle = {
     padding: "20px",
-    transition: "border-color var(--transition-fast), box-shadow var(--transition-fast)",
-    cursor: onClick || variant === "action" ? "pointer" : "default",
+    transition: "border-color 0.22s ease, box-shadow 0.22s ease, transform 0.18s ease",
+    cursor: isInteractive ? "pointer" : "default",
+    position: "relative",
+    overflow: "hidden",
     ...getVariantStyles(),
     ...style,
   };
@@ -69,54 +77,106 @@ export function Card({
   return (
     <motion.div
       style={baseStyle}
-      whileHover={hoverLift && (onClick || variant === "action" || variant === "feature") ? { y: -3, transition: { duration: 0.15 } } : undefined}
-      whileTap={onClick || variant === "action" ? { scale: 0.99 } : undefined}
+      whileHover={
+        hoverLift && isInteractive
+          ? { y: -3, boxShadow: "var(--shadow-hover)", borderColor: "var(--border-hover)", transition: { duration: 0.18 } }
+          : hoverLift
+          ? { borderColor: "var(--border-hover)", transition: { duration: 0.18 } }
+          : undefined
+      }
+      whileTap={isInteractive ? { scale: 0.99 } : undefined}
       className={`ui-card card-${variant} ${className}`.trim()}
       onClick={onClick}
       {...props}
     >
+      {/* Optional left accent border */}
+      {accent && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: 3,
+            background: accent,
+            borderRadius: "var(--radius-card) 0 0 var(--radius-card)",
+            opacity: 0.8,
+          }}
+        />
+      )}
       {children}
     </motion.div>
   );
 }
 
-/* Glass Card */
-export function GlassCard(props) {
-  return <Card variant="glass" {...props} />;
-}
+/* ── Convenience exports ── */
+export function GlassCard(props)     { return <Card variant="glass"     {...props} />; }
+export function DashboardCard(props) { return <Card variant="dashboard" {...props} />; }
+export function ChartCard(props)     { return <Card variant="chart"     {...props} />; }
+export function ActionCard(props)    { return <Card variant="action"    {...props} />; }
+export function FeatureCard(props)   { return <Card variant="feature"   {...props} />; }
 
-/* Dashboard Card */
-export function DashboardCard(props) {
-  return <Card variant="dashboard" {...props} />;
-}
-
-/* Chart Card */
-export function ChartCard(props) {
-  return <Card variant="chart" {...props} />;
-}
-
-/* Action Card */
-export function ActionCard(props) {
-  return <Card variant="action" {...props} />;
-}
-
-/* Feature Card */
-export function FeatureCard(props) {
-  return <Card variant="feature" {...props} />;
-}
-
-/* Metric Card (Phase 8 Requirement) */
+/* ── MetricCard (re-exported from Card for ergonomics) ── */
 export function MetricCard({ label, value, sub, color = "var(--color-teal)", trend }) {
   return (
     <Card style={{ padding: "16px 14px", textAlign: "center" }}>
-      <div className="typo-mono" style={{ fontSize: "22px", fontWeight: 700, color, marginBottom: "4px" }}>
+      {/* Top accent line */}
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 2,
+          background: color,
+          opacity: 0.55,
+          borderRadius: "var(--radius-card) var(--radius-card) 0 0",
+        }}
+      />
+
+      {trend && (
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            fontSize: 10,
+            fontWeight: 700,
+            color: trend === "up" ? "var(--success)" : "var(--danger)",
+          }}
+        >
+          {trend === "up" ? "▲" : "▼"}
+        </div>
+      )}
+
+      <div
+        className="typo-mono"
+        style={{
+          fontSize: "22px",
+          fontWeight: 700,
+          color,
+          marginBottom: "4px",
+          marginTop: 6,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
         {value}
       </div>
-      <div style={{ fontSize: "10px", color: "var(--text-muted)", letterSpacing: "0.5px", textTransform: "uppercase", fontWeight: 600 }}>
+
+      <div
+        style={{
+          fontSize: "10px",
+          color: "var(--text-muted)",
+          letterSpacing: "0.5px",
+          textTransform: "uppercase",
+          fontWeight: 700,
+        }}
+      >
         {label}
       </div>
+
       {sub && (
-        <div style={{ fontSize: "9.5px", color: "var(--text-secondary)", marginTop: "3px" }}>
+        <div style={{ fontSize: "9.5px", color: "var(--text-secondary)", marginTop: "3px", lineHeight: 1.4 }}>
           {sub}
         </div>
       )}

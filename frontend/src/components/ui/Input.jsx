@@ -49,8 +49,8 @@ export function Input({
           disabled={disabled}
           style={{
             width: "100%",
-            background: "var(--bg-surface)",
-            border: `1px solid ${
+            background: "var(--bg-elevated)",
+            border: `1.5px solid ${
               error
                 ? "var(--danger)"
                 : success
@@ -66,8 +66,18 @@ export function Input({
             boxSizing: "border-box",
             opacity: disabled ? 0.5 : 1,
             cursor: disabled ? "not-allowed" : "text",
-            transition: "border-color var(--transition-fast), box-shadow var(--transition-fast)",
+            transition: "border-color 0.2s ease, box-shadow 0.2s ease",
             ...style,
+          }}
+          onFocus={e => {
+            e.target.style.borderColor = error ? "var(--danger)" : "var(--color-teal)";
+            e.target.style.boxShadow   = error
+              ? "0 0 0 3px rgba(239,68,68,0.12)"
+              : "0 0 0 3px rgba(0,201,167,0.12)";
+          }}
+          onBlur={e => {
+            e.target.style.borderColor = error ? "var(--danger)" : success ? "var(--success)" : "var(--border)";
+            e.target.style.boxShadow   = "none";
           }}
           className={`ui-input ${className}`.trim()}
           {...props}

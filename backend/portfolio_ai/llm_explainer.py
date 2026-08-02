@@ -1,0 +1,237 @@
+"""
+llm_explainer.py
+
+TradeMind Portfolio AI Explanation Engine
+
+The LLM NEVER predicts.
+
+Random Forest
+LSTM
+FinBERT
+Fusion Engine
+
+already produced the portfolio analysis.
+
+The LLM only converts deterministic outputs into
+a professional investment report.
+
+Public API
+----------
+
+generate_portfolio_report()
+
+This function NEVER raises exceptions.
+
+If the LLM is unavailable, a deterministic fallback
+report is returned.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from typing import Dict, Optional
+
+try:
+    from openai import (
+        OpenAI,
+        APIConnectionError,
+        APITimeoutError,
+        APIStatusError,
+        RateLimitError,
+    )
+except ImportError:  # pragma: no cover - exercised when the package is absent
+    OpenAI = None
+
+    class APIConnectionError(Exception):
+        pass
+
+    class APITimeoutError(Exception):
+        pass
+
+    class APIStatusError(Exception):
+        def __init__(self, *args, **kwargs):
+            self.status_code = kwargs.get("status_code")
+            super().__init__(*args)
+
+    class RateLimitError(Exception):
+        pass
+
+from .models import PortfolioAIReport
+from .prompts import build_portfolio_prompt
+from backend.utils.logging import redact_sensitive_data
+
+logger = logging.getLogger(__name__)
+
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+API_KEY = os.getenv("OPENAI_API_KEY")
+
+TIMEOUT = 20
+MAX_TOKENS = 600
+
+client: Optional[OpenAI] = None
+
+if API_KEY:
+    try:
+        client = OpenAI(
+            api_key=API_KEY,
+            timeout=TIMEOUT,
+        )
+    except Exception:
+        logger.exception("Portfolio AI initialization failed.")
+        client = None
+
+
+# ---------------------------------------------------------
+# Availability
+# ---------------------------------------------------------
+
+def llm_available() -> bool:
+    return client is not None
+
+
+# ---------------------------------------------------------
+# Main Entry Point
+# ---------------------------------------------------------
+
+def generate_portfolio_report(
+    analysis: Dict,
+) -> PortfolioAIReport:
+    """
+    Generate an AI explanation from deterministic analysis.
+
+    Parameters
+    ----------
+    analysis
+
+        HistoricalAnalysis converted to dictionary.
+
+    Returns
+    -------
+    PortfolioAIReport
+    """
+
+    if not llm_available():
+        return _fallback_report(analysis)
+
+    prompt = build_portfolio_prompt(analysis)
+
+    try:
+        response = client.responses.create(
+            model=MODEL_NAME,
+            input=prompt,
+            temperature=0,
+            max_output_tokens=MAX_TOKENS,
+        )
+
+        text = response.output_text.strip()
+        logger.info(
+            "portfolio_ai.explanation_generated",
+            extra={"model": MODEL_NAME, "output_length": len(text)},
+        )
+        return _parse_response(text)
+
+    except (
+        APIConnectionError,
+        APITimeoutError,
+        APIStatusError,
+        RateLimitError,
+        ValueError,
+        Exception,
+    ):
+
+        logger.exception(
+            "Portfolio AI explanation failed.",
+            extra={"model": MODEL_NAME, "prompt_length": len(prompt)},
+        )
+
+        return _fallback_report(analysis)
+
+
+# ---------------------------------------------------------
+# JSON Parser
+# ---------------------------------------------------------
+
+def _parse_response(
+    content: str,
+) -> PortfolioAIReport:
+
+    text = content.strip()
+
+    if text.startswith("```"):
+        lines = [
+            line
+            for line in text.splitlines()
+            if not line.startswith("```")
+        ]
+        text = "\n".join(lines)
+
+    data = json.loads(text)
+
+    return PortfolioAIReport(**data)
+
+
+# ---------------------------------------------------------
+# Deterministic Fallback
+# ---------------------------------------------------------
+
+def _fallback_report(
+    analysis: Dict,
+) -> PortfolioAIReport:
+    """
+    Used whenever the LLM cannot be reached.
+
+    Uses only deterministic outputs.
+
+    Never invents information.
+    """
+
+    recommendation = analysis.get(
+        "recommendation",
+        "No recommendation available."
+    )
+
+    confidence = analysis.get(
+        "confidence",
+        0,
+    )
+
+    trend = analysis.get(
+        "trend",
+        "Unknown",
+    )
+
+    sentiment = analysis.get(
+        "sentiment",
+        "Unknown",
+    )
+
+    return PortfolioAIReport(
+
+        summary=(
+            "Portfolio analysis completed using deterministic AI models."
+        ),
+
+        strengths=[
+            f"Detected market trend: {trend}.",
+            f"Overall sentiment: {sentiment}.",
+        ],
+
+        risks=[
+            "AI explanation service unavailable.",
+            "Only deterministic analysis is shown.",
+        ],
+
+        recommendations=[
+            recommendation,
+        ],
+
+        outlook=(
+            "Future outlook follows the deterministic prediction generated by TradeMind."
+        ),
+
+        confidence_note=(
+            f"Model confidence is {confidence}%."
+        ),
+    )

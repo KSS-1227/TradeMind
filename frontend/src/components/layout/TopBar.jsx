@@ -1,180 +1,307 @@
 import React, { useState, useEffect } from "react";
-import { TrendingUp, Coins, LogOut } from "lucide-react";
+import { TrendingUp, Bell, Search, LogOut, ChevronRight } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import { motion, useScroll, useTransform } from "framer-motion";
 import { useAuth } from "../../context/AuthContext";
-import { fetchStockPrices } from "../../services/marketService";
+import { MarketStatus } from "./MarketStatus";
+import { AIStatus } from "./AIStatus";
 import { fmt } from "../../utils/formatters";
+import { NAV_ITEMS } from "../../constants/navigation";
 
-export function TopBar({ gold, isMobile }) {
-  const [nifty, setNifty] = useState(null);
-  const { user, signOut } = useAuth();
-
+function useCurrentTime() {
+  const [time, setTime] = useState(() => new Date());
   useEffect(() => {
-    let isMounted = true;
-    fetchStockPrices("NIFTYBEES")
-      .then((r) => {
-        const d = r.data || r;
-        if (Array.isArray(d) && d.length >= 2) {
-          const last = d[d.length - 1].Close;
-          const prev = d[d.length - 2].Close;
-          const chg = (((last - prev) / prev) * 100).toFixed(2);
-          if (isMounted) setNifty({ value: last.toFixed(1), change: chg });
-        }
-      })
-      .catch(() => {});
-
-    return () => {
-      isMounted = false;
-    };
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
   }, []);
+  return time;
+}
+
+function Breadcrumb({ pathname }) {
+  const crumb = NAV_ITEMS.find(
+    (n) => n.path !== "/" && pathname.startsWith(n.path)
+  ) ?? (pathname === "/" ? NAV_ITEMS[0] : null);
 
   return (
-    <header className="app-header">
-      {/* Brand logo */}
+    <nav aria-label="breadcrumb" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500 }}>TradeMind</span>
+      {crumb && crumb.path !== "/" && (
+        <>
+          <ChevronRight size={10} color="var(--text-muted)" />
+          <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>
+            {crumb.label}
+          </span>
+        </>
+      )}
+    </nav>
+  );
+}
+
+function GlobalSearch() {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+        padding: "6px 12px",
+        borderRadius: "var(--radius-md)",
+        background: focused ? "var(--bg-elevated)" : "var(--bg-primary)",
+        border: `1px solid ${focused ? "var(--border-focus)" : "var(--border)"}`,
+        transition: "all var(--transition-fast)",
+        cursor: "text",
+        minWidth: 180,
+        maxWidth: 260,
+      }}
+    >
+      <Search size={13} color="var(--text-muted)" style={{ flexShrink: 0 }} />
+      <input
+        type="text"
+        placeholder="Search stocks, features… "
+        aria-label="Global search"
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={{
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          color: "var(--text-primary)",
+          fontSize: 12,
+          flex: 1,
+          fontFamily: "var(--font-sans)",
+        }}
+      />
+      <kbd
+        style={{
+          fontSize: 10,
+          color: "var(--text-muted)",
+          background: "var(--bg-elevated)",
+          border: "1px solid var(--border)",
+          borderRadius: 4,
+          padding: "1px 5px",
+          flexShrink: 0,
+        }}
+      >
+        ⌘K
+      </kbd>
+    </label>
+  );
+}
+
+export function TopBar({ gold, isMobile }) {
+  const { user, signOut } = useAuth();
+  const location = useLocation();
+  const time = useCurrentTime();
+  const { scrollY } = useScroll();
+  const shadow = useTransform(scrollY, [0, 20], ["none", "0 1px 20px rgba(0,0,0,0.35)"]);
+
+  const timeStr = time.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  return (
+    <motion.header
+      style={{
+        position: "fixed",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 100,
+        height: 52,
+        background: "var(--bg-glass)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        borderBottom: "1px solid var(--border)",
+        display: "flex",
+        alignItems: "center",
+        boxShadow: shadow,
+      }}
+      role="banner"
+    >
+      {/* Brand */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "10px",
+          gap: 10,
           padding: "0 16px",
           flexShrink: 0,
-          borderRight: "1px solid var(--border-color)",
+          borderRight: "1px solid var(--border)",
           height: "100%",
-          minWidth: isMobile ? "140px" : "200px",
+          minWidth: isMobile ? 140 : 200,
         }}
       >
         <div
           style={{
-            width: "28px",
-            height: "28px",
-            borderRadius: "6px",
-            background: "var(--color-teal-bg)",
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            background: "linear-gradient(135deg, rgba(0,201,167,0.2) 0%, rgba(0,201,167,0.08) 100%)",
             border: "1px solid var(--color-teal-border)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             color: "var(--color-teal)",
+            flexShrink: 0,
           }}
+          className="ai-pulse"
+          aria-hidden="true"
         >
-          <TrendingUp size={18} />
+          <TrendingUp size={16} />
         </div>
         <div>
-          <div style={{ fontSize: "14px", fontWeight: 800, letterSpacing: "0.5px", color: "var(--text-primary)" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.2, color: "var(--text-primary)", lineHeight: 1.2 }}>
             TradeMind
           </div>
-          <div style={{ fontSize: "8.5px", color: "var(--color-teal)", letterSpacing: "0.5px", fontWeight: 700 }}>
-            AI CO-PILOT · NSE
+          <div style={{ fontSize: 8, color: "var(--color-teal)", letterSpacing: 1.2, fontWeight: 700, lineHeight: 1 }}>
+            AI FINTECH · NSE INDIA
           </div>
         </div>
       </div>
 
-      {/* Ticker Bar (Desktop) */}
+      {/* Page context — desktop */}
       {!isMobile && (
-        <div style={{ display: "flex", alignItems: "center", flex: 1, height: "100%", overflow: "hidden" }}>
-          {nifty && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "0 16px",
-                borderRight: "1px solid var(--border-color)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600 }}>NIFTY</span>
-              <span
-                className="mono"
-                style={{
-                  fontSize: "12px",
-                  fontWeight: 600,
-                  color: parseFloat(nifty.change) >= 0 ? "var(--color-teal)" : "var(--color-danger)",
-                }}
-              >
-                ₹{nifty.value}
-              </span>
-              <span
-                style={{
-                  fontSize: "10px",
-                  color: parseFloat(nifty.change) >= 0 ? "var(--color-teal)" : "var(--color-danger)",
-                }}
-              >
-                {parseFloat(nifty.change) >= 0 ? "+" : ""}
-                {nifty.change}%
-              </span>
-            </div>
-          )}
-
-          {gold && (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "0 16px",
-                borderRight: "1px solid var(--border-color)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              <Coins size={14} color="var(--color-gold)" />
-              <span style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: 600 }}>GOLD 24K/10g</span>
-              <span
-                className="mono"
-                style={{ fontSize: "12px", fontWeight: 600, color: "var(--color-gold)" }}
-              >
-                ₹{fmt(gold.current_price_10g)}
-              </span>
-            </div>
-          )}
+        <div
+          style={{
+            padding: "0 18px",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            borderRight: "1px solid var(--border)",
+            height: "100%",
+          }}
+        >
+          <Breadcrumb pathname={location.pathname} />
         </div>
       )}
 
-      {/* Mobile Ticker */}
-      {isMobile && gold && (
-        <div style={{ flex: 1, display: "flex", alignItems: "center", padding: "0 10px" }}>
-          <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>GOLD </span>
-          <span className="mono" style={{ fontSize: "11px", color: "var(--color-gold)", marginLeft: "4px" }}>
-            ₹{fmt(gold.current_price_10g)}/10g
+      {/* Spacer */}
+      <div style={{ flex: 1 }} />
+
+      {/* Controls — right side */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: isMobile ? 8 : 12,
+          padding: "0 14px",
+          flexShrink: 0,
+        }}
+      >
+        {/* Gold ticker — desktop */}
+        {!isMobile && gold && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "0 10px",
+              borderRight: "1px solid var(--border)",
+              height: "100%",
+            }}
+          >
+            <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.8px" }}>GOLD 24K</span>
+            <span
+              className="typo-mono ticker-live"
+              style={{ fontSize: 11, fontWeight: 700 }}
+            >
+              ₹{fmt(gold.current_price_10g)}
+            </span>
+          </div>
+        )}
+
+        {/* Market Status */}
+        <MarketStatus />
+
+        {/* AI Status */}
+        {!isMobile && <AIStatus state="ready" />}
+
+        {/* Global Search — desktop */}
+        {!isMobile && <GlobalSearch />}
+
+        {/* Clock — desktop */}
+        {!isMobile && (
+          <span
+            className="typo-mono"
+            style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600, userSelect: "none" }}
+            aria-label={`Current time: ${timeStr}`}
+          >
+            {timeStr}
           </span>
-        </div>
-      )}
+        )}
 
-      {/* User Actions */}
-      <div style={{ padding: "0 14px", display: "flex", alignItems: "center", gap: "10px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <span className="live-dot" />
-          <span style={{ fontSize: "10px", color: "var(--color-teal)", fontWeight: 600 }}>LIVE</span>
-        </div>
+        {/* Notifications */}
+        <button
+          aria-label="Notifications"
+          style={{
+            background: "transparent",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            padding: "6px 8px",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            transition: "all var(--transition-fast)",
+          }}
+        >
+          <Bell size={14} />
+        </button>
 
+        {/* User avatar + sign out */}
         {user && (
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginLeft: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {!isMobile && (
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                {user.email}
-              </span>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: "50%",
+                  background: "var(--color-teal-bg)",
+                  border: "1px solid var(--color-teal-border)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--color-teal)",
+                  flexShrink: 0,
+                  userSelect: "none",
+                }}
+                aria-hidden="true"
+              >
+                {(user.email?.[0] ?? "U").toUpperCase()}
+              </div>
             )}
             <button
               onClick={signOut}
-              title="Sign Out"
+              aria-label="Sign out"
+              title="Sign out"
               style={{
                 background: "transparent",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-md)",
+                padding: "5px 8px",
                 color: "var(--text-muted)",
-                border: "1px solid var(--border-color)",
-                borderRadius: "6px",
-                padding: "4px 8px",
-                fontSize: "12px",
                 cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
-                gap: "4px",
-                transition: "all 0.15s ease",
+                gap: 4,
+                fontSize: 12,
+                fontWeight: 600,
+                transition: "all var(--transition-fast)",
               }}
             >
-              <LogOut size={13} />
-              {!isMobile && <span>Sign out</span>}
+              <LogOut size={12} />
+              {!isMobile && <span>Out</span>}
             </button>
           </div>
         )}
       </div>
-    </header>
+    </motion.header>
   );
 }

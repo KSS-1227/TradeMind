@@ -48,6 +48,7 @@ from notifications.subscriptions import (
     symbols_with_subscribers,
 )
 from notifications.whatsapp import format_signal_alert, send_whatsapp_message
+from notifications.whatsapp_stock_service import WhatsAppSession, WhatsAppStockService
 from api_v2 import error as v2_error, router as v2_router
 
 # Ensure model exists on startup
@@ -326,6 +327,7 @@ def analyze_portfolio(request: PortfolioAnalyzeRequest):
                 "model_agreement":  analysis.model_agreement,
                 "lstm_status":      lstm_status,
                 "reasoning":        analysis.reasoning[:3],
+                "ai_report":       analysis.ai_report.model_dump() if analysis.ai_report else None,
             })
         except (ValueError, RuntimeError, OSError) as e:
             results.append({
@@ -336,7 +338,37 @@ def analyze_portfolio(request: PortfolioAnalyzeRequest):
     return {"holdings": results, "count": len(results)}
 
 
-class WhatsAppSubscribeRequest(BaseModel):
+# Per-sender WhatsApp sessions (in-process, resets on restart)
+_whatsapp_sessions: dict[str, WhatsAppSession] = {}
+_whatsapp_service = WhatsAppStockService()
+
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(request: Request):
+    """
+    Twilio WhatsApp webhook.
+
+    Configure this URL in the Twilio console under
+    Messaging → Sandbox → "When a message comes in".
+
+    Twilio sends form-encoded POST with at minimum:
+        From  — sender's WhatsApp number (whatsapp:+91...)
+        Body  — message text
+    """
+    form = await request.form()
+    sender: str = form.get("From", "")
+    text: str = form.get("Body", "").strip()
+
+    if not sender or not text:
+        return JSONResponse(status_code=400, content={"detail": "Missing From or Body"})
+
+    session = _whatsapp_sessions.setdefault(sender, WhatsAppSession())
+    reply = _whatsapp_service.process_message(sender, text, session)
+    send_whatsapp_message(sender, reply)
+    return {"status": "ok"}
+
+
+
     phone: str    # E.164 format, e.g. "+919876543210"
     symbol: str   # e.g. "RELIANCE" or "RELIANCE.NS"
 

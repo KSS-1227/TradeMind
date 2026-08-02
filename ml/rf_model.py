@@ -15,7 +15,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.frozen import FrozenEstimator
 from sklearn.utils.class_weight import compute_sample_weight
-from xgboost import XGBClassifier
+
+try:
+    from xgboost import XGBClassifier
+except ImportError:  # pragma: no cover - exercised when xgboost is not installed
+    XGBClassifier = None
 
 from data.fetch_prices import fetch_prices, STOCKS
 from ml.technical import add_technical_indicators
@@ -27,6 +31,8 @@ from ml.market_relative import (
 MODEL_PATH = os.path.join(PROJECT_ROOT, "ml", "rf_model.pkl")
 CALIBRATED_MODEL_PATH = os.path.join(PROJECT_ROOT, "ml", "rf_model_calibrated.pkl")
 SCALER_PATH = os.path.join(PROJECT_ROOT, "ml", "scaler.pkl")
+
+_MODEL_ARTIFACTS = None
 
 # Per-model-type save paths, so training an XGBoost run doesn't clobber the
 # RF artifacts (or vice versa) — each model_type gets its own files.
@@ -252,6 +258,8 @@ def build_estimator(model_type: str):
             n_jobs=-1
         )
     elif model_type == "xgboost":
+        if XGBClassifier is None:
+            raise ImportError("xgboost is required for the xgboost model path")
         # class_weight isn't a native XGBoost param — imbalance is handled
         # via sample_weight at fit time instead (see train_model()).
         # subsample/colsample/min_child_weight/reg_lambda are here
@@ -726,6 +734,21 @@ def run_calibration_experiment(model_type: str = "rf",
 
 
 
+def _load_model_artifacts():
+    global _MODEL_ARTIFACTS
+    if _MODEL_ARTIFACTS is not None:
+        return _MODEL_ARTIFACTS
+
+    if not os.path.exists(CALIBRATED_MODEL_PATH):
+        raise FileNotFoundError("Calibrated model not found")
+
+    model = joblib.load(MODEL_PATH)
+    calibrated_model = joblib.load(CALIBRATED_MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    _MODEL_ARTIFACTS = (model, calibrated_model, scaler)
+    return _MODEL_ARTIFACTS
+
+
 def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) -> dict:
     """
     Generate BUY/HOLD/SELL signal for a single stock.
@@ -740,9 +763,7 @@ def predict_signal(symbol: str, model=None, calibrated_model=None, scaler=None) 
             print("Calibrated model not found — training now...")
             model, calibrated_model, scaler = train_model()
         else:
-            model            = joblib.load(MODEL_PATH)
-            calibrated_model = joblib.load(CALIBRATED_MODEL_PATH)
-            scaler           = joblib.load(SCALER_PATH)
+            model, calibrated_model, scaler = _load_model_artifacts()
 
     # Fetch latest data
     df = fetch_prices(symbol, period="6mo")

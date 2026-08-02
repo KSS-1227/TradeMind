@@ -40,16 +40,34 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from openai import (
-    APIConnectionError,
-    APIStatusError,
-    APITimeoutError,
-    OpenAI,
-    RateLimitError,
-)
+try:
+    from openai import (
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+        OpenAI,
+        RateLimitError,
+    )
+except ImportError:  # pragma: no cover - exercised when the package is absent
+    OpenAI = None
+
+    class APIConnectionError(Exception):
+        pass
+
+    class APIStatusError(Exception):
+        def __init__(self, *args, **kwargs):
+            self.status_code = kwargs.get("status_code")
+            super().__init__(*args)
+
+    class APITimeoutError(Exception):
+        pass
+
+    class RateLimitError(Exception):
+        pass
 
 from .models import AIExplanation, ScamEvidence
 from .prompts import build_explanation_prompt
+from backend.utils.logging import redact_sensitive_data
 
 # ---------------------------------------------------------
 # Logging
@@ -190,28 +208,28 @@ def generate_explanation(
         return explanation
 
     except RateLimitError:
-        logger.warning("llm_explainer.rate_limit — falling back.")
+        logger.warning("llm_explainer.rate_limit — falling back.", extra={"model": MODEL_NAME})
 
     except APITimeoutError:
-        logger.warning("llm_explainer.timeout — falling back.")
+        logger.warning("llm_explainer.timeout — falling back.", extra={"model": MODEL_NAME})
 
     except APIConnectionError:
-        logger.warning("llm_explainer.connection_error — falling back.")
+        logger.warning("llm_explainer.connection_error — falling back.", extra={"model": MODEL_NAME})
 
     except APIStatusError as exc:
         logger.warning(
             "llm_explainer.api_status_error",
-            extra={"status_code": exc.status_code, "message": str(exc)},
+            extra={"status_code": exc.status_code, "message": redact_sensitive_data(str(exc)), "model": MODEL_NAME},
         )
 
     except ValueError as exc:
         logger.warning(
             "llm_explainer.parse_error",
-            extra={"error": str(exc)},
+            extra={"error": redact_sensitive_data(str(exc)), "model": MODEL_NAME},
         )
 
     except Exception:
-        logger.exception("llm_explainer.unexpected_error — falling back.")
+        logger.exception("llm_explainer.unexpected_error — falling back.", extra={"model": MODEL_NAME})
 
     return _fallback_explanation(recommendation_text, evidence)
 

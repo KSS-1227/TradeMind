@@ -13,6 +13,8 @@ export const ENDPOINTS = {
   V2_GOLD: "/v2/gold",
   V2_SCREENER: "/v2/screener",
   V2_WEALTH_PROJECT: "/v2/wealth/project",
+  V2_PORTFOLIO_ANALYZE: "/v2/portfolio/analyze",
+  V2_SCAM_ANALYZE: "/v2/scam/analyze",
   V2_WHATSAPP_WELCOME: "/v2/whatsapp/welcome",
 
   // Direct fallbacks for standard endpoints if needed
@@ -22,5 +24,7 @@ export const ENDPOINTS = {
   GOLD: "/gold",
   SCREENER: "/screener",
   WEALTH_PROJECT: "/wealth/project",
+  PORTFOLIO_ANALYZE: "/portfolio/analyze",
+  SCAM_ANALYZE: "/scam/analyze",
   WHATSAPP_WELCOME: "/whatsapp/welcome",
 };

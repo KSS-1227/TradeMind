@@ -1,0 +1,362 @@
+/* ============================================================
+   Wealth Projection — Apple Finance-inspired Premium UI
+   ============================================================ */
+
+/* ── Hero ── */
+.wp-hero {
+  margin-bottom: 32px;
+  position: relative;
+}
+
+.wp-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  border-radius: var(--radius-pill);
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  color: var(--color-gold, #FBBF24);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+
+.wp-hero-title {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+  margin: 0 0 10px 0;
+  background: linear-gradient(135deg, #FFFFFF 0%, #FBBF24 50%, #34D399 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@media (min-width: 768px) {
+  .wp-hero-title { font-size: 52px; }
+}
+
+.wp-hero-sub {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  max-width: 680px;
+  margin: 0;
+}
+
+/* ── Two-column layout ── */
+.wp-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 900px) {
+  .wp-layout {
+    grid-template-columns: 380px 1fr;
+  }
+}
+
+/* ── Form Panel ── */
+.wp-form-panel {
+  position: sticky;
+  top: 80px;
+}
+
+.wp-field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+.wp-field-row {
+  margin-bottom: 20px;
+}
+
+/* ── Slider ── */
+.wp-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.wp-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 4px;
+  background: var(--bg-elevated);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  position: relative;
+}
+
+.wp-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  cursor: pointer;
+  border: 3px solid var(--bg-surface);
+  box-shadow: 0 0 0 2px var(--color-teal-border);
+  transition: box-shadow 0.2s ease;
+}
+
+.wp-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 4px var(--color-teal-bg);
+}
+
+.wp-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  cursor: pointer;
+  border: 3px solid var(--bg-surface);
+}
+
+.wp-slider-val {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  min-width: 72px;
+  text-align: right;
+}
+
+/* ── Input Field ── */
+.wp-input {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.wp-input:focus {
+  border-color: var(--color-teal);
+  box-shadow: 0 0 0 3px var(--color-teal-bg, rgba(0, 201, 167, 0.12));
+}
+
+/* ── Goal Presets ── */
+.wp-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.wp-goal-chip {
+  padding: 8px 6px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.wp-goal-chip:hover,
+.wp-goal-chip.active {
+  border-color: var(--color-gold, #FBBF24);
+  color: var(--color-gold, #FBBF24);
+  background: rgba(251, 191, 36, 0.08);
+}
+
+/* â”€â”€ Retirement readiness â”€â”€ */
+.wp-retirement-section {
+  margin: 4px 0 24px;
+  padding: 20px;
+  border: 1px solid rgba(0, 201, 167, 0.17);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 88% 0%, rgba(0, 201, 167, 0.10), transparent 34%),
+    linear-gradient(120deg, var(--bg-surface), rgba(24, 36, 60, 0.72));
+}
+
+.wp-section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.wp-section-heading .wp-field-label { margin-bottom: 3px; }
+.wp-section-heading h2 { font-size: 17px; letter-spacing: -0.02em; color: var(--text-primary); }
+
+.wp-plan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.wp-plan-status span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.wp-plan-status.is-on-track { color: var(--success); background: var(--success-bg); border-color: var(--success-border); }
+.wp-plan-status.is-close { color: var(--color-gold, #FBBF24); background: var(--color-gold-bg); border-color: var(--color-gold-border); }
+.wp-plan-status.needs-work { color: var(--warning); background: var(--warning-bg); border-color: var(--warning-border); }
+
+.wp-retirement-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.wp-retirement-card {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: rgba(9, 13, 22, 0.35);
+}
+.wp-retirement-card span, .wp-retirement-card small { display: block; color: var(--text-muted); font-size: 10px; line-height: 1.35; }
+.wp-retirement-card strong { display: block; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font: 700 15px/1.35 var(--font-mono); margin: 2px 0; white-space: nowrap; }
+.wp-retirement-icon { display: grid; place-items: center; flex: 0 0 32px; height: 32px; border-radius: 10px; }
+.wp-retirement-icon.blue { color: var(--accent-blue); background: rgba(59, 130, 246, .12); }
+.wp-retirement-icon.teal { color: var(--color-teal); background: var(--color-teal-bg); }
+.wp-retirement-icon.gold { color: var(--color-gold); background: var(--color-gold-bg); }
+
+.wp-sip-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: -3px 0 16px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, .07);
+}
+.wp-sip-note svg { flex: 0 0 auto; color: var(--accent-blue); margin-top: 1px; }
+.wp-sip-note strong { color: var(--text-primary); }
+
+/* ── Crash toggle ── */
+.wp-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  margin-bottom: 16px;
+  transition: border-color 0.2s ease;
+}
+
+.wp-toggle-row:hover {
+  border-color: var(--danger-border);
+}
+
+/* ── KPI strip ── */
+.wp-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+@media (min-width: 640px) {
+  .wp-kpi-strip { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* ── Chart Tabs ── */
+.wp-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+  overflow-x: auto;
+}
+
+.wp-tab-btn {
+  padding: 8px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.wp-tab-btn.active {
+  color: var(--color-gold, #FBBF24);
+  border-bottom-color: var(--color-gold, #FBBF24);
+}
+
+.wp-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+/* ── AI Recommendation card ── */
+.wp-ai-card {
+  background: linear-gradient(135deg, rgba(251,191,36,0.07) 0%, var(--bg-surface) 100%);
+  border: 1px solid rgba(251, 191, 36, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 20px;
+}
+
+/* ── Milestone timeline ── */
+.wp-milestone {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(255,255,255,0.04));
+}
+
+.wp-milestone:last-child { border-bottom: none; }
+
+.wp-milestone-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-teal);
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+
+/* ── Goal progress ring label ── */
+.wp-goal-ring-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+@media (max-width: 720px) {
+  .wp-retirement-section { padding: 16px; }
+  .wp-retirement-grid { grid-template-columns: 1fr; }
+  .wp-retirement-card { padding: 12px; }
+}

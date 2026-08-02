@@ -1,66 +1,239 @@
-/* TradeMind Layout Styles */
-.app-header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
-  height: 52px;
-  background-color: var(--bg-surface);
-  border-bottom: 1px solid var(--border-color);
+/* ==========================================================
+   TradeMind Shell Layout
+   All layout primitives — no colours, no business styles.
+   ========================================================== */
+
+/* ----------------------------------------------------------
+   CSS variable aliases — bridge components that use the old
+   names (--border-color, --bg-raised, etc.) to the design
+   system tokens defined in theme.css
+   ---------------------------------------------------------- */
+:root {
+  --border-color:    var(--border);
+  --bg-raised:       var(--bg-elevated);
+  --color-danger:    var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger-border: var(--danger-border);
+  --color-teal-bg:   var(--color-teal-bg, rgba(0, 201, 167, 0.12));
+  --color-teal-border: var(--color-teal-border, rgba(0, 201, 167, 0.3));
+  --color-gold-bg:   var(--color-gold-bg, rgba(246, 201, 14, 0.12));
+  --color-gold-border: var(--color-gold-border, rgba(246, 201, 14, 0.3));
+  --text-dim:        var(--border);
+}
+
+/* ----------------------------------------------------------
+   App shell containers
+   ---------------------------------------------------------- */
+.app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+/* ----------------------------------------------------------
+   Sidebar — used by the CSS-in-JS Sidebar component.
+   These classes exist as semantic hooks; sizing is in JSX.
+   ---------------------------------------------------------- */
+.sidebar-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  text-decoration: none;
 }
 
-.app-sidebar {
-  position: fixed;
-  left: 0;
-  top: 52px;
-  bottom: 0;
-  width: 64px;
-  background-color: var(--bg-surface);
-  border-right: 1px solid var(--border-color);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding-top: 12px;
-  gap: 4px;
-  z-index: 90;
+.sidebar-item:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
-.app-bottom-nav {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background-color: var(--bg-surface);
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  justify-content: space-around;
-  padding: 6px 0 max(8px, env(safe-area-inset-bottom));
-  z-index: 100;
+.sidebar-item:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
 }
 
+/* ----------------------------------------------------------
+   Main content area
+   Used as a fallback; actual inline styles in AppLayout.jsx
+   ---------------------------------------------------------- */
 .app-main {
-  margin-top: 52px;
-  min-height: calc(100vh - 52px);
-  width: 100%;
   box-sizing: border-box;
+  width: 100%;
 }
 
-@media (min-width: 768px) {
-  .app-main {
-    margin-left: 64px;
-    padding: 28px 32px 40px;
-    max-width: calc(1080px + 64px);
-  }
+/* ----------------------------------------------------------
+   Utility grid classes
+   ---------------------------------------------------------- */
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
 }
 
-@media (max-width: 767px) {
-  .app-main {
-    margin-left: 0;
-    padding: 16px 14px 84px;
-    max-width: 100%;
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+}
+
+@media (max-width: 900px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 540px) {
+  .grid-4,
+  .grid-3,
+  .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* ----------------------------------------------------------
+   Stock selector row
+   ---------------------------------------------------------- */
+.stocks-scroll {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.stock-btn {
+  padding: 5px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.stock-btn:hover {
+  border-color: var(--color-teal);
+  color: var(--text-primary);
+}
+
+.stock-btn.active {
+  background: var(--color-teal-bg);
+  border-color: var(--color-teal);
+  color: var(--color-teal);
+}
+
+.stock-btn:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+
+/* ----------------------------------------------------------
+   Metric card — used with MetricCard component
+   ---------------------------------------------------------- */
+.metric-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-4) var(--space-3);
+  text-align: center;
+  transition: border-color var(--transition-fast);
+}
+
+.metric-card:hover {
+  border-color: var(--border-hover);
+}
+
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  line-height: 1.2;
+}
+
+.metric-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+/* ----------------------------------------------------------
+   Tab bar
+   ---------------------------------------------------------- */
+.tab-bar {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--space-5);
+}
+
+.tab {
+  padding: 9px 16px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: var(--font-sans);
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+  position: relative;
+}
+
+.tab:hover {
+  color: var(--text-primary);
+}
+
+.tab.active {
+  color: var(--color-teal);
+  border-bottom-color: var(--color-teal);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+
+/* ----------------------------------------------------------
+   Mono utility
+   ---------------------------------------------------------- */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ----------------------------------------------------------
+   Signal header layout
+   ---------------------------------------------------------- */
+.signal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ----------------------------------------------------------
+   Page transition wrapper
+   ---------------------------------------------------------- */
+.page-transition-wrapper {
+  width: 100%;
+}
+
+/* ----------------------------------------------------------
+   Reduce motion
+   ---------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

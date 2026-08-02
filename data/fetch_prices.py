@@ -1,5 +1,8 @@
 # data/fetch_prices.py
-import yfinance as yf
+try:
+    import yfinance as yf
+except ImportError:  # pragma: no cover - exercised when yfinance is not installed
+    yf = None
 import pandas as pd
 from datetime import datetime
 import os
@@ -46,6 +49,10 @@ SCREENER_UNIVERSE = STOCKS + [
 
 def fetch_prices(symbol: str, period: str = "1y") -> pd.DataFrame:
     """Fetch OHLCV data for a single NSE stock or ETF"""
+    if yf is None:
+        logger.warning("data.fetch_prices.unavailable — yfinance not installed")
+        return pd.DataFrame()
+
     try:
         df = yf.download(symbol, period=period, interval="1d", progress=False)
         if df.empty:
@@ -85,6 +92,10 @@ def fetch_prices_batch(symbols: list, period: str = "6mo") -> dict:
     """
     if not symbols:
         return {}
+    if yf is None:
+        logger.warning("data.fetch_prices.batch_unavailable — yfinance not installed")
+        return {s: fetch_prices(s, period) for s in symbols}
+
     try:
         raw = yf.download(tickers=symbols, period=period, interval="1d",
                            group_by="ticker", progress=False, threads=True)
@@ -140,6 +151,10 @@ def fetch_gold_price_inr() -> dict:
     Converts international USD/troy oz → INR/10g
     Applies the current 6% import duty and 3% GST exactly once.
     """
+    if yf is None:
+        logger.warning("data.fetch_prices.gold_unavailable — yfinance not installed")
+        return {"error": "Could not fetch gold data"}
+
     try:
         # Fetch gold futures price in USD
         gold_df = yf.download("GC=F", period="3mo",

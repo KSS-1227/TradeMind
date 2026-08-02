@@ -1,0 +1,218 @@
+/* TradeMind AI Financial Operating System — Dashboard Styles */
+
+.db-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.db-greeting-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  background: linear-gradient(
+    135deg,
+    #FFFFFF   0%,
+    #E2E8F0  35%,
+    #00C9A7  65%,
+    #38BDF8 100%
+  );
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 6px;
+}
+
+@media (min-width: 768px) {
+  .db-greeting-title {
+    font-size: 38px;
+  }
+}
+
+.db-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.db-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill, 9999px);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.db-status-open {
+  background: var(--color-teal-bg, rgba(0, 201, 167, 0.12));
+  border: 1px solid var(--color-teal-border, rgba(0, 201, 167, 0.3));
+  color: var(--color-teal, #00C9A7);
+}
+
+.db-status-ai {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: var(--accent-blue, #3B82F6);
+}
+
+/* Quick Metrics Grid */
+.db-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 640px) {
+  .db-metrics-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .db-metrics-grid {
+    grid-template-columns: repeat(6, 1fr);
+  }
+}
+
+/* Market Overview Grid */
+.db-market-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 640px) {
+  .db-market-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .db-market-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Market Heatmap Grid */
+.db-heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+
+@media (min-width: 480px) {
+  .db-heatmap-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 768px) {
+  .db-heatmap-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+.db-heatmap-tile {
+  padding: 14px 10px;
+  border-radius: var(--radius-md, 10px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.db-heatmap-tile:hover {
+  transform: scale(1.03);
+  box-shadow: var(--shadow-md);
+}
+
+.db-heatmap-green {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #34D399;
+}
+
+.db-heatmap-red {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #F87171;
+}
+
+.db-heatmap-neutral {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #FBBF24;
+}
+
+/* Quick Actions Grid */
+.db-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 640px) {
+  .db-actions-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .db-actions-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
+}
+
+/* Live Activity Stream */
+.db-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.db-activity-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+}
+
+.db-activity-item:hover {
+  background: var(--bg-elevated);
+  border-color: var(--border-hover);
+}
+
+/* Skeleton Loading Elements */
+.db-skeleton-box {
+  background: linear-gradient(90deg, var(--bg-surface) 25%, var(--bg-elevated) 50%, var(--bg-surface) 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.5s infinite ease-in-out;
+  border-radius: var(--radius-md, 10px);
+}
+
+@keyframes skeletonShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
