@@ -126,6 +126,31 @@ def health(request: Request):
     )
 
 
+@router.get("/signal/full/{symbol}", response_model=ApiSuccessEnvelope)
+def signal_full(request: Request, symbol: str):
+    """Complete HistoricalService analysis — single source of truth for
+    AI Screener, Portfolio Doctor, Full Analysis, and WhatsApp."""
+    sym = symbol.upper()
+    if not sym.endswith(".NS") and sym not in {"GC=F", "SI=F"}:
+        sym = sym + ".NS"
+    try:
+        service = HistoricalService()
+        analysis = service.analyze(sym)
+        data = analysis.model_dump()
+        # Flatten explainability sub-keys for frontend convenience
+        expl = data.pop("explainability", {}) or {}
+        data["technical_indicators"] = expl.get("technical_indicators", {})
+        data["risk_metrics"]         = expl.get("risk_metrics", {})
+        data["shap_values"]          = expl.get("shap_values", {})
+        data["available_models"]     = expl.get("available_models", [])
+        return success(request, data, "Full analysis completed successfully.")
+    except ValueError as exc:
+        return error(request, status_code=404, code="SYMBOL_NOT_FOUND", message=str(exc))
+    except (RuntimeError, OSError):
+        logger.exception("v2.signal_full.failed", extra={"request_id": _request_id(request)})
+        return error(request, status_code=503, code="ANALYSIS_UNAVAILABLE", message="Analysis temporarily unavailable.")
+
+
 @router.get("/signal/{symbol}", response_model=ApiSuccessEnvelope)
 def signal(request: Request, symbol: str):
     sym = symbol.upper()

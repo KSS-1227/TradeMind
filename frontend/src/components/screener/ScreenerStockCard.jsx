@@ -24,7 +24,7 @@ export function ScreenerStockCard({
 }) {
   const [showShap, setShowShap] = useState(false);
 
-  const confPct = signal.confidence != null ? Math.round(signal.confidence * 100) : null;
+  const confPct = stock.confidence != null ? Math.round(stock.confidence * 100) : null;
   const signal_label = stock.recommendation || "—";
   const targetPrice = stock.predicted_price ?? null;
   const expectedReturn = stock.expected_return ?? null;

@@ -33,12 +33,16 @@ def research(symbol: str) -> dict:
     try:
         relative_feats = compute_live_relative_features(symbol, df, STOCKS, period="6mo")
         latest.update(relative_feats)
+        for feat, val in relative_feats.items():
+            df[feat] = val
     except Exception as e:
         print(f"[Research Agent] Market-relative features failed ({e}) — "
               f"falling back to 0 for those fields. Signal quality may be "
               f"degraded but won't crash.")
         from ml.market_relative import MARKET_RELATIVE_FEATURES
         latest.update({f: 0.0 for f in MARKET_RELATIVE_FEATURES})
+        for feat in MARKET_RELATIVE_FEATURES:
+            df[feat] = 0.0
 
     # Fetch news
     headlines     = fetch_news(symbol, days=7)
