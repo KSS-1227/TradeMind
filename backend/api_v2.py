@@ -16,7 +16,9 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from data.fetch_prices import SCREENER_UNIVERSE
+from agents.pipeline import run_pipeline
+from data.fetch_prices import SCREENER_UNIVERSE, fetch_gold_price_inr, fetch_prices
+from ml.backtest import run_backtest
 from ml.screener import screen_stocks
 from ml.strategy_builder import backtest_custom_rule
 from ml.wealth_calculator import project_wealth
@@ -122,6 +124,67 @@ def health(request: Request):
         {"status": "ok", "model_available": (PROJECT_ROOT / "ml" / "rf_model.pkl").exists()},
         "Service is healthy.",
     )
+
+
+@router.get("/signal/{symbol}", response_model=ApiSuccessEnvelope)
+def signal(request: Request, symbol: str):
+    sym = symbol.upper()
+    if not sym.endswith(".NS") and sym not in {"GC=F", "SI=F"}:
+        sym = sym + ".NS"
+    try:
+        result = run_pipeline(sym)
+        if "error" in result:
+            return error(request, status_code=404, code="SYMBOL_NOT_FOUND", message=result["error"])
+        result["symbol"] = symbol.upper().replace(".NS", "")
+        return success(request, result, "Signal generated successfully.")
+    except (ValueError, RuntimeError) as exc:
+        return error(request, status_code=503, code="SIGNAL_UNAVAILABLE", message=str(exc))
+
+
+@router.get("/prices/{symbol}", response_model=ApiSuccessEnvelope)
+def prices(request: Request, symbol: str):
+    import pandas as pd
+    sym = symbol.upper()
+    if not sym.endswith(".NS") and sym not in {"GC=F", "SI=F"}:
+        sym = sym + ".NS"
+    df = fetch_prices(sym, period="3mo")
+    if df.empty:
+        return error(request, status_code=404, code="NO_DATA", message="No price data available.")
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+    if "Date" not in df.columns:
+        df = df.reset_index()
+    rows = [{"Date": str(row["Date"])[:10], "Close": round(float(row["Close"]), 2)}
+            for _, row in df.iterrows() if "Close" in row and "Date" in row]
+    return success(request, {"data": rows}, "Prices fetched successfully.")
+
+
+@router.get("/backtest/{symbol}", response_model=ApiSuccessEnvelope)
+def backtest(request: Request, symbol: str):
+    sym = symbol.upper()
+    if not sym.endswith(".NS"):
+        sym = sym + ".NS"
+    try:
+        result = run_backtest(sym, period="5y")
+        if "error" in result:
+            return error(request, status_code=404, code="BACKTEST_FAILED", message=result["error"])
+        return success(request, result, "Backtest completed successfully.")
+    except (ValueError, RuntimeError) as exc:
+        return error(request, status_code=503, code="BACKTEST_UNAVAILABLE", message=str(exc))
+
+
+@router.post("/screener", response_model=ApiSuccessEnvelope)
+def screener(request: Request, payload: ScreenerAnalyzeRequest):
+    """Alias matching the frontend's /v2/screener endpoint."""
+    return screener_analyze(request, payload)
+
+
+@router.get("/gold", response_model=ApiSuccessEnvelope)
+def gold(request: Request):
+    result = fetch_gold_price_inr()
+    if "error" in result:
+        return error(request, status_code=503, code="GOLD_UNAVAILABLE", message=result["error"])
+    return success(request, result, "Gold price fetched successfully.")
 
 
 @router.post("/screener/analyze", response_model=ApiSuccessEnvelope)
