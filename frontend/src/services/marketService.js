@@ -1,12 +1,19 @@
 import apiClient from "./apiClient";
 import { ENDPOINTS } from "../constants/api";
 
+// Unwrap the v2 success envelope { success, data, ... } -> data
+const unwrapV2 = (response) => response.data?.data ?? response.data;
+
+export const fetchFullStockSignal = async (symbol) => {
+  const response = await apiClient.get(ENDPOINTS.V2_SIGNAL_FULL(symbol));
+  return unwrapV2(response);
+};
+
 export const fetchStockSignal = async (symbol) => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_SIGNAL(symbol));
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
-    // Fallback to legacy endpoint if v2 returns 404
     if (err.status === 404) {
       const fallback = await apiClient.get(ENDPOINTS.SIGNAL(symbol));
       return fallback.data;
@@ -18,7 +25,7 @@ export const fetchStockSignal = async (symbol) => {
 export const fetchStockPrices = async (symbol) => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_PRICES(symbol));
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.get(ENDPOINTS.PRICES(symbol));
@@ -31,7 +38,7 @@ export const fetchStockPrices = async (symbol) => {
 export const fetchGoldPrice = async () => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_GOLD);
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.get(ENDPOINTS.GOLD);
@@ -44,7 +51,7 @@ export const fetchGoldPrice = async () => {
 export const fetchBacktest = async (symbol) => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_BACKTEST(symbol));
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.get(ENDPOINTS.BACKTEST(symbol));
@@ -57,7 +64,7 @@ export const fetchBacktest = async (symbol) => {
 export const runScreener = async (query) => {
   try {
     const response = await apiClient.post(ENDPOINTS.V2_SCREENER, { query });
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.post(ENDPOINTS.SCREENER, { query });
@@ -70,7 +77,7 @@ export const runScreener = async (query) => {
 export const calculateWealthProjection = async (payload) => {
   try {
     const response = await apiClient.post(ENDPOINTS.V2_WEALTH_PROJECT, payload);
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.post(ENDPOINTS.WEALTH_PROJECT, payload);
@@ -83,7 +90,7 @@ export const calculateWealthProjection = async (payload) => {
 export const analyzePortfolio = async (holdings) => {
   try {
     const response = await apiClient.post(ENDPOINTS.V2_PORTFOLIO_ANALYZE, { holdings });
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.post(ENDPOINTS.PORTFOLIO_ANALYZE, { holdings });
@@ -94,10 +101,9 @@ export const analyzePortfolio = async (holdings) => {
 };
 
 export const analyzeScamMessage = async (payload) => {
-  // payload: { message, stock_symbol?, source? }
   try {
     const response = await apiClient.post(ENDPOINTS.V2_SCAM_ANALYZE, payload);
-    return response.data;
+    return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
       const fallback = await apiClient.post(ENDPOINTS.SCAM_ANALYZE, payload);
@@ -106,5 +112,4 @@ export const analyzeScamMessage = async (payload) => {
     throw err;
   }
 };
-
 

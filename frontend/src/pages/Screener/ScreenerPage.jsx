@@ -13,7 +13,7 @@ import { ScreenerFilterBar } from "../../components/screener/ScreenerFilterBar";
 import { StockCompareModal } from "../../components/screener/StockCompareModal";
 import { ScreenerStockCard } from "../../components/screener/ScreenerStockCard";
 import { STOCKS } from "../../constants/stocks";
-import { fetchStockSignal, runScreener } from "../../services/marketService";
+import { fetchFullStockSignal, runScreener } from "../../services/marketService";
 import { isDemoModeEnabled } from "../../utils/demoMode";
 import { toast } from "sonner";
 import "../../styles/screener.css";
@@ -69,6 +69,30 @@ export function ScreenerPage() {
     return points;
   };
 
+  // Normalize a HistoricalAnalysis response into a ScreenerStockCard-compatible shape
+  const normalizeAnalysis = (analysis, sym) => ({
+    symbol: (analysis.symbol || sym).replace(".NS", ""),
+    current_price: analysis.current_price,
+    recommendation: analysis.recommendation,
+    confidence: analysis.confidence,
+    expected_return: analysis.expected_return,
+    predicted_price: analysis.predicted_price,
+    overall_risk: analysis.overall_risk,
+    overall_score: analysis.overall_score,
+    trend: analysis.trend,
+    agreement: analysis.agreement,
+    model_agreement: analysis.model_agreement,
+    sentiment: analysis.sentiment,
+    sector: getSectorForSymbol(analysis.symbol || sym),
+    sparkline: generateSparkline(analysis.current_price),
+    technical_indicators: analysis.technical_indicators || {},
+    risk_metrics: analysis.risk_metrics || {},
+    shap_values: analysis.shap_values || {},
+    reasoning: analysis.reasoning || [],
+    ai_report: analysis.ai_report || null,
+    fullSignal: analysis,
+  });
+
   // Run Screener Query or Fetch Stock Signal
   const executeScreener = useCallback(async (queryStr) => {
     if (isDemoModeEnabled()) {
@@ -110,59 +134,52 @@ export function ScreenerPage() {
       const matchedSymbol = STOCKS.find((s) => s === cleanUpper || s.replace(".NS", "") === cleanUpper);
 
       if (matchedSymbol) {
-        const signal = await fetchStockSignal(matchedSymbol);
+        const analysis = await fetchFullStockSignal(matchedSymbol);
         clearInterval(stageInterval);
         setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        setSelectedStockSignal(signal);
-
-        // Normalize stock card result
-        const cardItem = {
-          symbol: signal.symbol?.replace(".NS", ""),
-          current_price: signal.price || 2500,
-          recommendation: signal.signal || "BUY",
-          confidence: signal.confidence || 0.88,
-          expected_return: 14.5,
-          predicted_price: Math.round((signal.price || 2500) * 1.08),
-          overall_risk: signal.risk || "LOW",
-          sector: getSectorForSymbol(signal.symbol),
-          sparkline: generateSparkline(signal.price || 2500),
-          fullSignal: signal,
-        };
-
+        const cardItem = normalizeAnalysis(analysis, matchedSymbol);
+        setSelectedStockSignal(analysis);
         setScreenedStocks([cardItem]);
         setViewMode("details");
       } else {
-        // Run NLP screener or fetch default stock universe
+        // Run NLP screener then fetch full analysis for each match
         const screenerRes = await runScreener(q || "RSI below 50 and bullish trend");
         clearInterval(stageInterval);
         setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
         await new Promise((resolve) => setTimeout(resolve, 300));
 
-        if (screenerRes && screenerRes.matches) {
-          const cards = screenerRes.matches.map((m) => {
-            const sym = m.symbol?.replace(".NS", "");
-            return {
-              symbol: sym,
-              current_price: m.price || 1500,
-              recommendation: "BUY",
-              confidence: 0.86,
-              expected_return: 12.4,
-              predicted_price: Math.round((m.price || 1500) * 1.09),
-              overall_risk: "LOW",
-              sector: getSectorForSymbol(sym),
-              sparkline: generateSparkline(m.price || 1500),
-              matched_conditions: m.matched_conditions,
-            };
-          });
-
-          setScreenedStocks(cards.length > 0 ? cards : getDefaultUniverse());
-          setViewMode("cards");
+        const matches = screenerRes?.matches ?? [];
+        if (matches.length > 0) {
+          const cards = await Promise.all(
+            matches.map(async (m) => {
+              const sym = (m.symbol || "").replace(".NS", "");
+              try {
+                const analysis = await fetchFullStockSignal(sym);
+                return normalizeAnalysis(analysis, sym);
+              } catch {
+                // Screener match but analysis unavailable — use screener data only
+                return {
+                  symbol: sym,
+                  current_price: m.price || null,
+                  recommendation: null,
+                  confidence: null,
+                  expected_return: null,
+                  predicted_price: null,
+                  overall_risk: null,
+                  sector: getSectorForSymbol(sym),
+                  sparkline: generateSparkline(m.price || 1000),
+                  matched_conditions: m.matched_conditions,
+                };
+              }
+            })
+          );
+          setScreenedStocks(cards);
         } else {
-          setScreenedStocks(getDefaultUniverse());
-          setViewMode("cards");
+          setScreenedStocks([]);
         }
+        setViewMode("cards");
       }
       toast.success("AI Stock Screener execution complete!");
     } catch (err) {
@@ -188,137 +205,6 @@ export function ScreenerPage() {
     return "Energy";
   };
 
-  const getDefaultUniverse = () => [
-    {
-      symbol: "RELIANCE",
-      current_price: 2950,
-      recommendation: "BUY",
-      confidence: 0.92,
-      expected_return: 16.2,
-      predicted_price: 3200,
-      overall_risk: "LOW",
-      sector: "Energy",
-      sparkline: generateSparkline(2950),
-      technical_indicators: { rsi: "28.4 (Oversold)", macd: "+18.4 Bullish", ema: "Above 50 EMA", volume: "3.2M (2.1x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "BUY", confidence: "92%", match: true },
-        { name: "LSTM Trend", signal: "BULLISH", confidence: "94%", match: true },
-        { name: "FinBERT", signal: "POSITIVE", confidence: "89%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "RSI Rebound Signal", impact: "+5.2%", type: "positive" },
-        { feature: "Q3 Earnings Revenue Growth", impact: "+3.8%", type: "positive" },
-        { feature: "50-Day EMA Support", impact: "+2.1%", type: "positive" },
-        { feature: "Crude Oil Price Fluctuation", impact: "-0.9%", type: "negative" },
-      ],
-    },
-    {
-      symbol: "TCS",
-      current_price: 3820,
-      recommendation: "ACCUMULATE",
-      confidence: 0.88,
-      expected_return: 12.8,
-      predicted_price: 4100,
-      overall_risk: "LOW",
-      sector: "IT & Tech",
-      sparkline: generateSparkline(3820),
-      technical_indicators: { rsi: "42.1 (Neutral)", macd: "+11.2 Bullish", ema: "Crossed 20 EMA", volume: "1.8M (1.2x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "ACCUMULATE", confidence: "88%", match: true },
-        { name: "LSTM Trend", signal: "BULLISH", confidence: "86%", match: true },
-        { name: "FinBERT", signal: "POSITIVE", confidence: "91%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "Cloud Deal Pipeline Expansion", impact: "+4.1%", type: "positive" },
-        { feature: "FinBERT Tech Sentiment", impact: "+3.2%", type: "positive" },
-        { feature: "US Tech Spending Outlook", impact: "-1.5%", type: "negative" },
-      ],
-    },
-    {
-      symbol: "INFY",
-      current_price: 1410,
-      recommendation: "HOLD",
-      confidence: 0.76,
-      expected_return: 8.5,
-      predicted_price: 1520,
-      overall_risk: "MEDIUM",
-      sector: "IT & Tech",
-      sparkline: generateSparkline(1410),
-      technical_indicators: { rsi: "52.8 (Neutral)", macd: "-2.4 Bearish", ema: "Near 50 EMA", volume: "2.4M (1.0x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "HOLD", confidence: "76%", match: true },
-        { name: "LSTM Trend", signal: "SIDEWAYS", confidence: "72%", match: true },
-        { name: "FinBERT", signal: "NEUTRAL", confidence: "80%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "Margin Stabilization", impact: "+2.1%", type: "positive" },
-        { feature: "Short-term Attrition Factor", impact: "-2.8%", type: "negative" },
-      ],
-    },
-    {
-      symbol: "HDFCBANK",
-      current_price: 1560,
-      recommendation: "BUY",
-      confidence: 0.85,
-      expected_return: 14.1,
-      predicted_price: 1720,
-      overall_risk: "LOW",
-      sector: "Banking & Fin",
-      sparkline: generateSparkline(1560),
-      technical_indicators: { rsi: "34.5 (Oversold)", macd: "+8.9 Bullish", ema: "Above 200 EMA", volume: "4.5M (1.6x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "BUY", confidence: "85%", match: true },
-        { name: "LSTM Trend", signal: "BULLISH", confidence: "88%", match: true },
-        { name: "FinBERT", signal: "POSITIVE", confidence: "83%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "NIM Expansion", impact: "+3.9%", type: "positive" },
-        { feature: "Deposit Growth Ratio", impact: "+2.8%", type: "positive" },
-      ],
-    },
-    {
-      symbol: "ICICIBANK",
-      current_price: 1120,
-      recommendation: "BUY",
-      confidence: 0.90,
-      expected_return: 15.5,
-      predicted_price: 1260,
-      overall_risk: "LOW",
-      sector: "Banking & Fin",
-      sparkline: generateSparkline(1120),
-      technical_indicators: { rsi: "31.2 (Oversold)", macd: "+14.1 Bullish", ema: "Above 50 EMA", volume: "3.8M (2.0x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "BUY", confidence: "90%", match: true },
-        { name: "LSTM Trend", signal: "BULLISH", confidence: "91%", match: true },
-        { name: "FinBERT", signal: "POSITIVE", confidence: "88%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "Asset Quality Improvement", impact: "+4.4%", type: "positive" },
-        { feature: "Retail Credit Momentum", impact: "+3.1%", type: "positive" },
-      ],
-    },
-    {
-      symbol: "TATAMOTORS",
-      current_price: 960,
-      recommendation: "BUY",
-      confidence: 0.89,
-      expected_return: 18.4,
-      predicted_price: 1100,
-      overall_risk: "MEDIUM",
-      sector: "Automotive",
-      sparkline: generateSparkline(960),
-      technical_indicators: { rsi: "38.6 (Bullish)", macd: "+16.8 Bullish", ema: "Above 50 EMA", volume: "5.1M (2.3x Avg)" },
-      models: [
-        { name: "Random Forest", signal: "BUY", confidence: "89%", match: true },
-        { name: "LSTM Trend", signal: "BULLISH", confidence: "92%", match: true },
-        { name: "FinBERT", signal: "POSITIVE", confidence: "86%", match: true },
-      ],
-      shap_drivers: [
-        { feature: "JLR Order Book Expansion", impact: "+5.1%", type: "positive" },
-        { feature: "EV Market Share Growth", impact: "+4.2%", type: "positive" },
-      ],
-    },
-  ];
 
   // Initial load
   useEffect(() => {
@@ -353,8 +239,8 @@ export function ScreenerPage() {
   const handleCardClick = async (stock) => {
     setLoading(true);
     try {
-      const signal = await fetchStockSignal(stock.symbol);
-      setSelectedStockSignal(signal);
+      const analysis = await fetchFullStockSignal(stock.symbol);
+      setSelectedStockSignal(analysis);
       setViewMode("details");
     } catch (e) {
       toast.error("Failed to load details for " + stock.symbol);

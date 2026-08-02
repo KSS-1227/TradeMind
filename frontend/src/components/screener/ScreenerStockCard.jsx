@@ -24,35 +24,26 @@ export function ScreenerStockCard({
 }) {
   const [showShap, setShowShap] = useState(false);
 
-  const confPct = Math.round((stock.confidence || 0.85) * 100);
-  const signal = stock.recommendation || "BUY";
-  const targetPrice = stock.predicted_price || Math.round((stock.current_price || 1000) * 1.1);
-  const expectedReturn = stock.expected_return || 14.2;
-  const riskLevel = stock.overall_risk || "LOW";
+  const confPct = signal.confidence != null ? Math.round(signal.confidence * 100) : null;
+  const signal_label = stock.recommendation || "—";
+  const targetPrice = stock.predicted_price ?? null;
+  const expectedReturn = stock.expected_return ?? null;
+  const riskLevel = stock.overall_risk || "—";
 
-  // Default technical indicators if not present
-  const tech = stock.technical_indicators || {
-    rsi: stock.rsi || "32.4 (Oversold)",
-    macd: stock.macd || "+14.2 Bullish",
-    ema: stock.ema || "Above 50 EMA",
-    volume: stock.volume || "2.1M (1.8x Avg)",
-  };
+  // Technical indicators from backend explainability
+  const tech = stock.technical_indicators || {};
 
-  // Default model agreement if not present
-  const modelAgreement = stock.models || [
-    { name: "Random Forest", signal: signal, confidence: `${confPct}%`, match: true },
-    { name: "LSTM Trend", signal: "BULLISH", confidence: "90%", match: true },
-    { name: "FinBERT", signal: "POSITIVE", confidence: "87%", match: true },
-    { name: "Fusion Engine", signal: "STRONG CONFLUENCE", confidence: "HIGH", match: true },
-  ];
+  // Model agreement from backend
+  const modelAgreement = stock.models || null;
 
-  // Default SHAP drivers if not present
-  const shapDrivers = stock.shap_drivers || [
-    { feature: "RSI Rebound Signal", impact: "+4.8%", type: "positive" },
-    { feature: "FinBERT News Sentiment", impact: "+3.6%", type: "positive" },
-    { feature: "50-Day EMA Support", impact: "+2.4%", type: "positive" },
-    { feature: "Macro Volatility Index", impact: "-1.2%", type: "negative" },
-  ];
+  // SHAP drivers from backend reasoning
+  const shapDrivers = stock.shap_values
+    ? Object.entries(stock.shap_values).map(([feature, impact]) => ({
+        feature,
+        impact: impact > 0 ? `+${(impact * 100).toFixed(1)}%` : `${(impact * 100).toFixed(1)}%`,
+        type: impact >= 0 ? "positive" : "negative",
+      }))
+    : (stock.reasoning || []).map((r) => ({ feature: r, impact: null, type: "positive" }));
 
   return (
     <Card
@@ -79,9 +70,9 @@ export function ScreenerStockCard({
           right: 0,
           height: "2px",
           background:
-            signal === "BUY" || signal === "ACCUMULATE"
+            signal_label === "BUY" || signal_label === "ACCUMULATE"
               ? "linear-gradient(90deg, var(--color-teal), var(--success))"
-              : signal === "SELL"
+              : signal_label === "SELL"
               ? "linear-gradient(90deg, var(--danger), var(--warning))"
               : "linear-gradient(90deg, var(--warning), var(--color-gold))",
           opacity: 0.8,
@@ -117,7 +108,7 @@ export function ScreenerStockCard({
         </div>
 
         {/* Requirement 2: AI Signal Badge */}
-        <Badge signal={signal} size="md" />
+        <Badge signal={signal_label} size="md" />
       </div>
 
       {/* ================= PRICE & TARGET ROW ================= */}
@@ -145,7 +136,7 @@ export function ScreenerStockCard({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            ₹<CountUp end={stock.current_price || 0} decimals={2} duration={1.2} separator="," />
+          ₹<CountUp end={stock.current_price || 0} decimals={2} duration={1.2} separator="," />
           </div>
         </div>
 
@@ -162,7 +153,10 @@ export function ScreenerStockCard({
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            ₹<CountUp end={targetPrice} duration={1.2} separator="," />
+          {targetPrice != null
+            ? <>₹<CountUp end={targetPrice} duration={1.2} separator="," /></>
+            : <span style={{ color: "var(--text-muted)" }}>—</span>
+          }
           </div>
         </div>
       </div>
@@ -176,7 +170,7 @@ export function ScreenerStockCard({
           </div>
 
           <div style={{ fontSize: "13px", fontWeight: 800, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>
-            <CountUp end={confPct} duration={1.2} />%
+            {confPct != null ? <><CountUp end={confPct} duration={1.2} />%</> : "—"}
           </div>
         </div>
 
@@ -191,7 +185,7 @@ export function ScreenerStockCard({
         >
           <motion.div
             initial={{ width: 0 }}
-            animate={{ width: `${confPct}%` }}
+            animate={{ width: confPct != null ? `${confPct}%` : "0%" }}
             transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
             style={{
               height: "100%",
@@ -216,7 +210,8 @@ export function ScreenerStockCard({
         </div>
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-          {modelAgreement.map((m, idx) => (
+          {modelAgreement
+            ? modelAgreement.map((m, idx) => (
             <div
               key={idx}
               style={{
@@ -236,7 +231,9 @@ export function ScreenerStockCard({
               <span style={{ color: "var(--text-muted)" }}>{m.name}:</span>
               <span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{m.signal}</span>
             </div>
-          ))}
+          ))
+            : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>Model data unavailable</span>
+          }
         </div>
       </div>
 
@@ -261,7 +258,10 @@ export function ScreenerStockCard({
             EST. RETURN
           </div>
           <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--success)", fontFamily: "var(--font-mono)", marginTop: "2px" }}>
-            +<CountUp end={expectedReturn} decimals={1} duration={1.2} />%
+            {expectedReturn != null
+              ? <><span>+</span><CountUp end={expectedReturn} decimals={1} duration={1.2} />%</>
+              : "—"
+            }
           </div>
         </div>
 
@@ -278,7 +278,10 @@ export function ScreenerStockCard({
             TARGET
           </div>
           <div style={{ fontSize: "14px", fontWeight: 800, color: "var(--color-teal)", fontFamily: "var(--font-mono)", marginTop: "2px" }}>
-            ₹<CountUp end={targetPrice} duration={1.2} />
+            {targetPrice != null
+              ? <>₹<CountUp end={targetPrice} duration={1.2} /></>
+              : "—"
+            }
           </div>
         </div>
 
@@ -317,7 +320,7 @@ export function ScreenerStockCard({
               marginTop: "4px",
             }}
           >
-            {riskLevel} RISK
+            {riskLevel !== "—" ? `${riskLevel} RISK` : "—"}
           </div>
         </div>
       </div>
@@ -337,22 +340,22 @@ export function ScreenerStockCard({
       >
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>RSI (14):</span>
-          <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.rsi}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.rsi || "—"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>MACD:</span>
-          <span style={{ fontWeight: 700, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>{tech.macd}</span>
+        <span style={{ fontWeight: 700, color: "var(--color-teal)", fontFamily: "var(--font-mono)" }}>{tech.macd || "—"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>50 EMA:</span>
-          <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.ema}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.ema || "—"}</span>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           <span style={{ color: "var(--text-muted)" }}>Volume:</span>
-          <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.volume}</span>
+        <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.volume || "—"}</span>
         </div>
       </div>
 
@@ -429,9 +432,11 @@ export function ScreenerStockCard({
                   SHAP MODEL EXPLANATION DRIVERS
                 </div>
 
-                {shapDrivers.map((driver, idx) => (
+                {shapDrivers.length > 0
+                  ? shapDrivers.map((driver, idx) => (
                   <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px" }}>
                     <span style={{ color: "var(--text-secondary)" }}>{driver.feature}</span>
+                    {driver.impact != null && (
                     <span
                       style={{
                         fontWeight: 700,
@@ -441,8 +446,11 @@ export function ScreenerStockCard({
                     >
                       {driver.impact}
                     </span>
+                    )}
                   </div>
-                ))}
+                ))
+                  : <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No SHAP data available</span>
+                }
               </div>
             </motion.div>
           )}

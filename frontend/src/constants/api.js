@@ -7,6 +7,7 @@ export const API_BASE_URL = process.env.REACT_APP_API_URL || "https://kss-1227-t
 
 export const ENDPOINTS = {
   // Stable V2 Endpoints
+  V2_SIGNAL_FULL: (symbol) => `/v2/signal/full/${symbol}`,
   V2_SIGNAL: (symbol) => `/v2/signal/${symbol}`,
   V2_PRICES: (symbol) => `/v2/prices/${symbol}`,
   V2_BACKTEST: (symbol) => `/v2/backtest/${symbol}`,

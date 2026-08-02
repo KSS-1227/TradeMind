@@ -14,7 +14,7 @@ export function SignalCard({ signal, isMobile }) {
   const [tab, setTab] = useState("signal");
   const [prices, setPrices] = useState([]);
 
-  const sigColor = SIGNAL_COLORS[signal.signal] || SIGNAL_COLORS.HOLD;
+  const sigColor = SIGNAL_COLORS[signal.recommendation?.toUpperCase()] || SIGNAL_COLORS.HOLD;
   const conf = parseConf(signal.confidence);
 
   useEffect(() => {
@@ -95,7 +95,7 @@ export function SignalCard({ signal, isMobile }) {
                 marginBottom: 4,
               }}
             >
-              ₹{signal.price?.toLocaleString("en-IN") ?? signal.price}
+              ₹{(signal.current_price ?? signal.price)?.toLocaleString("en-IN")}
             </div>
 
             <div style={{ fontSize: 11, color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
@@ -112,7 +112,7 @@ export function SignalCard({ signal, isMobile }) {
               gap: 8,
             }}
           >
-            <Badge signal={signal.signal} size="lg" />
+            <Badge signal={signal.recommendation?.toUpperCase()} size="lg" />
 
             <div style={{ textAlign: isMobile ? "left" : "right" }}>
               <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4, fontWeight: 600, letterSpacing: "0.5px" }}>
@@ -161,19 +161,19 @@ export function SignalCard({ signal, isMobile }) {
       <div className="grid-3" style={{ marginBottom: "14px" }}>
         <MetricCard
           label="Sharpe Ratio"
-          value={signal.risk?.sharpe || "—"}
+          value={signal.risk_metrics?.sharpe ?? signal.risk?.sharpe ?? "—"}
           color="var(--color-teal)"
           sub="Risk-adjusted return"
         />
         <MetricCard
           label="Max Drawdown"
-          value={signal.risk?.drawdown || "—"}
+          value={signal.risk_metrics?.drawdown ?? signal.risk?.drawdown ?? "—"}
           color="var(--danger)"
           sub="Peak-to-trough"
         />
         <MetricCard
           label="VaR 95%"
-          value={signal.risk?.var || "—"}
+          value={signal.risk_metrics?.var ?? signal.risk?.var ?? "—"}
           color="var(--color-gold)"
           sub="Value at Risk"
         />
@@ -212,7 +212,7 @@ export function SignalCard({ signal, isMobile }) {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {signal.reasons?.map((r, i) => (
+                {(signal.reasoning ?? signal.reasons)?.map((r, i) => (
                   <motion.div
                     key={i}
                     initial={{ opacity: 0, x: -8 }}
@@ -237,7 +237,7 @@ export function SignalCard({ signal, isMobile }) {
                 ))}
               </div>
 
-              {signal.risk?.note && (
+              {(signal.risk_metrics?.note ?? signal.risk?.note) && (
                 <div
                   style={{
                     marginTop: 14,
@@ -253,7 +253,7 @@ export function SignalCard({ signal, isMobile }) {
                   }}
                 >
                   <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-                  {signal.risk.note}
+                  {signal.risk_metrics?.note ?? signal.risk?.note}
                 </div>
               )}
             </Card>
@@ -327,7 +327,7 @@ export function SignalCard({ signal, isMobile }) {
               </div>
 
               <div style={{ display: "flex", gap: 10 }}>
-                {Object.entries(signal.sentiment?.scores || {}).map(([k, v]) => {
+                {Object.entries(signal.sentiment?.scores || signal.sentiment_scores || {}).map(([k, v]) => {
                   const colorMap = {
                     positive: "var(--success)",
                     negative: "var(--danger)",
