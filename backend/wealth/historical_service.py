@@ -113,7 +113,15 @@ class HistoricalService:
             sentiment = self._run_provider(
                 "finbert", self._sentiment, normalized_symbol, research_data
             )
-            fusion = self._run_fusion(predictions, sentiment)
+            current_price = self._current_price(research_data)
+            predicted_price = self._optional_float(
+                predictions["lstm"].get("predicted_price")
+            )
+            fusion = self._run_fusion(
+                predictions, sentiment,
+                current_price=current_price,
+                predicted_price=predicted_price,
+            )
             analysis = self._build_analysis(
                 normalized_symbol, research_data, predictions, sentiment, fusion
             )
@@ -220,12 +228,16 @@ class HistoricalService:
         self,
         predictions: Mapping[str, Mapping[str, Any]],
         sentiment: Mapping[str, Any],
+        current_price: float | None = None,
+        predicted_price: float | None = None,
     ) -> FusionResult:
         try:
             result = self._fusion.combine(
                 random_forest=predictions["random_forest"],
                 lstm=predictions["lstm"],
                 finbert=sentiment,
+                current_price=current_price,
+                predicted_price=predicted_price,
             )
         except Exception as exc:
             logger.exception("fusion_failed")

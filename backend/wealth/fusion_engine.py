@@ -103,6 +103,8 @@ class FusionEngine:
         *,
         volatility: float | None = None,
         expected_return: float | None = None,
+        current_price: float | None = None,
+        predicted_price: float | None = None,
         **legacy_inputs: Any,
     ) -> FusionResult:
         """Fuse RF, LSTM and FinBERT outputs into one decision.
@@ -131,10 +133,17 @@ class FusionEngine:
             (signal.expected_return for signal in signals if signal.expected_return is not None),
             None,
         )
+        recommendation = self._recommendation(
+            ai_score,
+            agreement_score,
+            expected_return=expected,
+            current_price=current_price,
+            predicted_price=predicted_price,
+        )
         return FusionResult(
             ai_score=round(ai_score * 100, 2),
             confidence=round(self._confidence(available, sentiment, agreement_score) * 100, 2),
-            recommendation=self._recommendation(ai_score, agreement_score),
+            recommendation=recommendation,
             risk=self._risk(volatility, expected, agreement_score, sentiment),
             agreement=self._agreement_label(agreement_score),
             model_agreement=agreement_score >= self.config.MODEL_AGREEMENT_THRESHOLD,
@@ -143,7 +152,7 @@ class FusionEngine:
                 "available_models": list(scores),
                 "consensus": agreement_score >= self.config.MODEL_AGREEMENT_THRESHOLD,
             },
-            reasoning=self._reasoning(available, sentiment, agreement_score, expected),
+            reasoning=self._reasoning(available, sentiment, agreement_score, expected, recommendation),
             weighted_scores={name: round(value * 100, 2) for name, value in weighted_scores.items()},
         )
 
@@ -184,15 +193,80 @@ class FusionEngine:
                 if (name == "finbert" and sentiment.available) or
                 any(signal.name == name and signal.available for signal in signals)}
 
-    def _recommendation(self, score: float, agreement: float) -> str:
+    def _recommendation(
+        self,
+        score: float,
+        agreement: float,
+        expected_return: float | None = None,
+        current_price: float | None = None,
+        predicted_price: float | None = None,
+    ) -> str:
+        """Single source of truth for BUY / HOLD / SELL.
+
+        Decision hierarchy (each gate can only override downward to HOLD,
+        never flip direction):
+
+        1. Low agreement → HOLD regardless of score.
+        2. Price-direction consistency check:
+           - Predicted > current + positive return → block SELL unless
+             score is overwhelmingly bearish (< STRONG_SELL_THRESHOLD).
+           - Predicted < current + negative return → block BUY unless
+             score is overwhelmingly bullish (> STRONG_BUY_THRESHOLD).
+        3. Small expected-return band (±HOLD_RETURN_BAND) → HOLD unless
+           confidence is exceptional (score outside BUY/SELL thresholds
+           AND agreement is strong).
+        4. Score thresholds → BUY / SELL / HOLD.
+
+        Only canonical labels (BUY, HOLD, SELL) are returned.
+        """
+        # Gate 1 — insufficient model agreement
         if agreement < self.config.DISAGREEMENT_THRESHOLD:
             return HOLD
-        if score >= self.config.STRONG_BUY_THRESHOLD and agreement >= self.config.MODEL_AGREEMENT_THRESHOLD:
-            return "STRONG BUY"
+
+        # Derive directional evidence from price targets
+        price_bullish = (
+            predicted_price is not None
+            and current_price is not None
+            and current_price > 0
+            and predicted_price > current_price
+            and expected_return is not None
+            and expected_return > 0
+        )
+        price_bearish = (
+            predicted_price is not None
+            and current_price is not None
+            and current_price > 0
+            and predicted_price < current_price
+            and expected_return is not None
+            and expected_return < 0
+        )
+
+        # Gate 2 — price-direction consistency
+        # Bullish price target: only allow SELL if score is overwhelmingly low
+        if price_bullish and score <= self.config.SELL_THRESHOLD:
+            if score > self.config.STRONG_SELL_THRESHOLD:
+                return HOLD  # conflicting evidence → neutral
+        # Bearish price target: only allow BUY if score is overwhelmingly high
+        if price_bearish and score >= self.config.BUY_THRESHOLD:
+            if score < self.config.STRONG_BUY_THRESHOLD:
+                return HOLD  # conflicting evidence → neutral
+
+        # Gate 3 — small expected-return band → default HOLD
+        HOLD_BAND = 0.02  # ±2 %
+        if expected_return is not None and abs(expected_return) < HOLD_BAND:
+            # Override to directional only when score AND agreement are both strong
+            if not (
+                agreement >= self.config.MODEL_AGREEMENT_THRESHOLD
+                and (
+                    score >= self.config.STRONG_BUY_THRESHOLD
+                    or score <= self.config.STRONG_SELL_THRESHOLD
+                )
+            ):
+                return HOLD
+
+        # Gate 4 — score thresholds (canonical labels only)
         if score >= self.config.BUY_THRESHOLD:
             return BUY
-        if score <= self.config.STRONG_SELL_THRESHOLD and agreement >= self.config.MODEL_AGREEMENT_THRESHOLD:
-            return "STRONG SELL"
         if score <= self.config.SELL_THRESHOLD:
             return SELL
         return HOLD
@@ -221,15 +295,66 @@ class FusionEngine:
             return "Medium"
         return "Low"
 
-    def _reasoning(self, signals: Sequence[_Signal], sentiment: _Signal,
-                   agreement: float, expected_return: float | None) -> list[str]:
-        reasons = [f"{signal.name.replace('_', ' ').title()} produced a {signal.label or 'directional'} signal."
-                   for signal in signals if signal.available]
+    def _reasoning(
+        self,
+        signals: Sequence[_Signal],
+        sentiment: _Signal,
+        agreement: float,
+        expected_return: float | None,
+        recommendation: str,
+    ) -> list[str]:
+        """Generate a coherent explanation that describes *why* the final
+        recommendation was selected, not just what each model said."""
+        reasons: list[str] = []
+
+        # 1. Lead with the decision and its primary driver
+        if agreement < self.config.DISAGREEMENT_THRESHOLD:
+            reasons.append(
+                f"Recommendation is {recommendation}: models are too divided to "
+                "support a directional call."
+            )
+        elif expected_return is not None and abs(expected_return) < 0.02:
+            reasons.append(
+                f"Recommendation is {recommendation}: expected return of "
+                f"{expected_return * 100:.1f}% is within the neutral band (±2%)."
+            )
+        else:
+            direction_word = {
+                BUY: "bullish", SELL: "bearish", HOLD: "neutral"
+            }.get(recommendation, "neutral")
+            reasons.append(
+                f"Recommendation is {recommendation}: the weighted model ensemble "
+                f"is {direction_word} with {'strong' if agreement >= self.config.MODEL_AGREEMENT_THRESHOLD else 'moderate'} "
+                f"agreement ({agreement * 100:.0f}%)."
+            )
+
+        # 2. Per-model contributions
+        for signal in signals:
+            if not signal.available:
+                continue
+            label = signal.label or "directional"
+            reasons.append(
+                f"{signal.name.replace('_', ' ').title()} signal: {label} "
+                f"(certainty {signal.certainty * 100:.0f}%)."
+            )
+
+        # 3. Sentiment
         if sentiment.available:
-            reasons.append(f"Financial news sentiment is {sentiment.label} with {sentiment.certainty * 100:.0f}% certainty.")
-        reasons.append("Models are directionally aligned." if agreement >= self.config.MODEL_AGREEMENT_THRESHOLD else "Model outputs are materially divided.")
+            reasons.append(
+                f"FinBERT news sentiment: {sentiment.label} "
+                f"({sentiment.certainty * 100:.0f}% certainty)."
+            )
+
+        # 4. Expected return context
         if expected_return is not None:
-            reasons.append(f"The LSTM expected return is {expected_return * 100:.1f}%.")
+            er_pct = expected_return * 100
+            if abs(er_pct) >= 2:
+                direction = "upside" if er_pct > 0 else "downside"
+                reasons.append(
+                    f"LSTM projects {er_pct:+.1f}% {direction} expected return."
+                )
+
+        # 5. Price-direction consistency note when a conflict was resolved
         return reasons
 
     def _agreement(self, scores: Mapping[str, float], weights: Mapping[str, float]) -> float:
