@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { TrendingUp, Bell, Search, LogOut, ChevronRight } from "lucide-react";
+import { TrendingUp, Bell, Search, LogOut, ChevronRight, Menu } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
 import { useAuth } from "../../context/AuthContext";
@@ -90,7 +90,7 @@ function GlobalSearch() {
   );
 }
 
-export function TopBar({ gold, isMobile }) {
+export function TopBar({ gold, isMobile, onMenuClick }) {
   const { user, signOut } = useAuth();
   const location = useLocation();
   const time = useCurrentTime();
@@ -122,7 +122,7 @@ export function TopBar({ gold, isMobile }) {
       }}
       role="banner"
     >
-      {/* Brand */}
+      {/* Mobile hamburger + Brand */}
       <div
         style={{
           display: "flex",
@@ -135,6 +135,25 @@ export function TopBar({ gold, isMobile }) {
           minWidth: isMobile ? 140 : 200,
         }}
       >
+        {isMobile && (
+          <button
+            onClick={onMenuClick}
+            aria-label="Open navigation"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius-md)",
+              padding: "6px 7px",
+              color: "var(--text-muted)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              flexShrink: 0,
+            }}
+          >
+            <Menu size={15} />
+          </button>
+        )}
         <div
           style={{
             width: 30,
