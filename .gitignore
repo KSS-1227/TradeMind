@@ -17,4 +17,5 @@ ml/rf_model.pkl
 ml/scaler.pkl
 .vercel
 ml/rf_calibrated.pkl
-ml/*.pt
+ml/lstm_model.pt
+frontend.zip 
