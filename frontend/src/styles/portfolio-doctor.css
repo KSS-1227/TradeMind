@@ -84,7 +84,8 @@
 .pd-metrics-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
+  gap: 10px;
+  align-content: start;
 }
 
 @media (min-width: 640px) {
@@ -95,8 +96,28 @@
 
 @media (min-width: 1024px) {
   .pd-metrics-grid {
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(3, 1fr);
   }
+}
+
+/* Skeleton shimmer */
+@keyframes pd-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.pd-metric-skeleton {
+  min-height: 110px;
+  border-radius: var(--radius-card, 12px);
+  background: linear-gradient(
+    90deg,
+    var(--bg-elevated, #18243C) 25%,
+    rgba(255,255,255,0.06) 50%,
+    var(--bg-elevated, #18243C) 75%
+  );
+  background-size: 800px 100%;
+  animation: pd-shimmer 1.4s infinite linear;
+  border: 1px solid var(--border);
 }
 
 /* Report Header & Score Panel */

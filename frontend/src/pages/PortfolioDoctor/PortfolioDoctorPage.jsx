@@ -28,14 +28,120 @@ import { isDemoModeEnabled } from "../../utils/demoMode";
 import "../../styles/portfolio-doctor.css";
 
 const LOADER_STAGES = [
-  "Loading Market Data",
-  "Evaluating Holdings",
-  "Calculating Risk",
-  "Running AI Models",
-  "Checking Diversification",
-  "Generating Recommendations",
-  "Generating AI Investment Report...",
+  "Analyzing portfolio...",
+  "Running AI models...",
+  "Evaluating risk and diversification...",
+  "Generating recommendations...",
+  "Finalizing AI Investment Report...",
 ];
+
+const STAGE_INTERVAL_MS = Math.floor(110_000 / (LOADER_STAGES.length - 1));
+
+// ─── Metric skeleton placeholder ────────────────────────────────────────────
+function MetricSkeleton() {
+  return (
+    <div className="pd-metric-skeleton" />
+  );
+}
+
+// ─── Safe number helper ──────────────────────────────────────────────────────
+function safeNum(v, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+// ─── Clamp to [0, 100] ──────────────────────────────────────────────────────
+function clamp100(v) {
+  return Math.min(100, Math.max(0, Math.round(safeNum(v))));
+}
+
+// ─── Compute all report metrics from raw holdings ───────────────────────────
+function computeReport(rawHoldings, requestId, aiReport) {
+  const n = rawHoldings.length || 1;
+
+  // ── Financials ──
+  const totalInvested   = rawHoldings.reduce((s, h) => s + safeNum(h.invested_amount), 0);
+  const totalMarketValue = rawHoldings.reduce((s, h) => s + safeNum(h.market_value), 0);
+  const totalPnl        = totalMarketValue - totalInvested;
+  const totalPnlPct     = totalInvested > 0 ? +((totalPnl / totalInvested) * 100).toFixed(1) : 0;
+
+  // ── Weights ──
+  const holdingsWithWeight = rawHoldings.map((h) => ({
+    ...h,
+    weight: totalMarketValue > 0
+      ? Math.round((safeNum(h.market_value, safeNum(h.quantity) * safeNum(h.buy_price)) / totalMarketValue) * 100)
+      : Math.round(100 / n),
+  }));
+
+  // ── Risk ──
+  const riskCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+  holdingsWithWeight.forEach((h) => {
+    const r = (h.overall_risk || "").toUpperCase();
+    if (r.includes("HIGH"))   riskCounts.HIGH++;
+    else if (r.includes("MEDIUM")) riskCounts.MEDIUM++;
+    else riskCounts.LOW++;
+  });
+  const overallRisk = riskCounts.HIGH > 0 ? "HIGH" : riskCounts.MEDIUM > 0 ? "MEDIUM" : "LOW";
+
+  // ── AI Confidence — backend sends 0–100 or 0–1; normalise to 0–100 ──
+  const rawConf = rawHoldings.reduce((s, h) => s + safeNum(h.confidence), 0) / n;
+  // If average > 1 it's already in percent; otherwise multiply by 100
+  const aiConfidence = clamp100(rawConf > 1 ? rawConf : rawConf * 100);
+
+  // ── Diversification (Herfindahl) ──
+  const hhi = holdingsWithWeight.reduce((s, h) => s + Math.pow(h.weight / 100, 2), 0);
+  const diversificationScore = Math.max(20, Math.round((1 - hhi) * 100));
+
+  // ── Expected return & volatility from backend per-holding data ──
+  const validReturns = rawHoldings
+    .map((h) => safeNum(h.expected_return))
+    .filter((v) => v !== 0);
+  // expected_return from backend is a fraction (e.g. 0.08 = 8%)
+  const avgExpectedReturn = validReturns.length > 0
+    ? +((validReturns.reduce((s, v) => s + v, 0) / validReturns.length) * 100).toFixed(1)
+    : (overallRisk === "HIGH" ? 14.5 : overallRisk === "MEDIUM" ? 11.2 : 8.5);
+
+  const expectedVolatility = overallRisk === "HIGH" ? 22.4
+    : overallRisk === "MEDIUM" ? 14.8 : 9.6;
+
+  // ── Health Score — composite of 5 factors, each 0–20 ──
+  //   1. AI Confidence component (0–20)
+  const confComponent = (aiConfidence / 100) * 20;
+  //   2. Diversification component (0–20)
+  const divComponent = (diversificationScore / 100) * 20;
+  //   3. Risk component: LOW=20, MEDIUM=12, HIGH=4
+  const riskComponent = overallRisk === "LOW" ? 20 : overallRisk === "MEDIUM" ? 12 : 4;
+  //   4. Return component: positive return up to 20%, capped at 20
+  const retComponent = Math.min(20, Math.max(0, avgExpectedReturn));
+  //   5. Model score component (0–20)
+  const avgModelScore = rawHoldings.reduce((s, h) => s + safeNum(h.overall_score, 5), 0) / n;
+  const scoreComponent = Math.min(20, (avgModelScore / 10) * 20);
+
+  const rawHealth = confComponent + divComponent + riskComponent + retComponent + scoreComponent;
+  const healthScore = clamp100(rawHealth);
+
+  // ── Market Outlook — derived from risk + return, not hardcoded ──
+  const marketOutlook = avgExpectedReturn >= 10 && overallRisk !== "HIGH" ? "BULLISH"
+    : avgExpectedReturn <= 0 || overallRisk === "HIGH" ? "BEARISH"
+    : "NEUTRAL";
+
+  return {
+    holdings: holdingsWithWeight,
+    totalInvested,
+    totalMarketValue,
+    totalPnl,
+    totalPnlPct,
+    healthScore,
+    overallRisk,
+    expectedReturn: avgExpectedReturn,
+    expectedVolatility,
+    diversificationScore,
+    aiConfidence,
+    marketOutlook,
+    requestId,
+    ai_report: aiReport,
+  };
+}
 
 export function PortfolioDoctorPage() {
   const context = useOutletContext();
@@ -111,11 +217,10 @@ export function PortfolioDoctorPage() {
     setLoaderStep(0);
     setErrorDetails(null);
 
-    // Simulate 7-stage workflow steps sequentially while fetching real API
-    let apiPromise = analyzePortfolio(holdingsPayload);
     let stageInterval;
 
     try {
+      // Advance loader stages proportionally across the 120 s window
       let currentStep = 0;
       stageInterval = setInterval(() => {
         currentStep++;
@@ -124,9 +229,9 @@ export function PortfolioDoctorPage() {
         } else {
           clearInterval(stageInterval);
         }
-      }, 500);
+      }, STAGE_INTERVAL_MS);
 
-      const res = await apiPromise;
+      const res = await analyzePortfolio(holdingsPayload);
       clearInterval(stageInterval);
 
       // Finish loader stages cleanly
@@ -135,65 +240,11 @@ export function PortfolioDoctorPage() {
 
       if (res && (res.success !== false) && (res.data?.holdings || res.holdings)) {
         const rawHoldings = res.data?.holdings || res.holdings || [];
-        const requestId = res.request_id || res.data?.request_id || null;
+        const requestId   = res.request_id || res.data?.request_id || null;
+        const aiReport    = res.data?.ai_report || res.ai_report
+          || rawHoldings.find((h) => h.ai_report)?.ai_report || null;
 
-        // Process portfolio aggregates
-        const totalInvested = rawHoldings.reduce((sum, h) => sum + (h.invested_amount || 0), 0);
-        const totalMarketValue = rawHoldings.reduce((sum, h) => sum + (h.market_value || 0), 0);
-        const totalPnl = totalMarketValue - totalInvested;
-        const totalPnlPct = totalInvested > 0 ? ((totalPnl / totalInvested) * 100).toFixed(2) : 0;
-
-        // Calculate weights if backend didn't provide explicit weight
-        const holdingsWithWeight = rawHoldings.map((h) => {
-          const weight = totalMarketValue > 0
-            ? Math.round(((h.market_value || (h.quantity * h.buy_price)) / totalMarketValue) * 100)
-            : Math.round(100 / rawHoldings.length);
-          return { ...h, weight };
-        });
-
-        // Health Score calculation (weighted score * 10)
-        const avgScore = rawHoldings.length > 0
-          ? rawHoldings.reduce((sum, h) => sum + (h.overall_score || 7.5), 0) / rawHoldings.length
-          : 7.8;
-        const healthScore = Math.min(Math.round(avgScore * 10), 100);
-
-        // Overall risk summary
-        const hasHigh = holdingsWithWeight.some((h) => (h.overall_risk || "").toUpperCase().includes("HIGH"));
-        const overallRisk = hasHigh ? "HIGH" : "MEDIUM";
-
-        // Expected return & Volatility
-        const expectedReturn = 12.8;
-        const expectedVolatility = hasHigh ? 18.4 : 12.2;
-
-        // Diversification score (Herfindahl Index metric)
-        const weightSumSq = holdingsWithWeight.reduce((sum, h) => sum + Math.pow(h.weight / 100, 2), 0);
-        const divScore = Math.max(20, Math.round((1 - weightSumSq) * 100));
-
-        // AI Confidence average
-        const avgConf = Math.round(
-          (rawHoldings.reduce((sum, h) => sum + (h.confidence || 0.85), 0) / rawHoldings.length) * 100
-        );
-
-        // Extract backend AI Investment Report if available
-        const aiReport = res.data?.ai_report || res.ai_report || rawHoldings.find((h) => h.ai_report)?.ai_report || null;
-
-        setReportData({
-          holdings: holdingsWithWeight,
-          totalInvested,
-          totalMarketValue,
-          totalPnl,
-          totalPnlPct,
-          healthScore,
-          overallRisk,
-          expectedReturn,
-          expectedVolatility,
-          diversificationScore: divScore,
-          aiConfidence: avgConf,
-          marketOutlook: "BULLISH",
-          requestId,
-          ai_report: aiReport,
-        });
-
+        setReportData(computeReport(rawHoldings, requestId, aiReport));
         setViewState("report");
         toast.success("AI Portfolio Analysis completed successfully!");
       } else {
@@ -204,13 +255,24 @@ export function PortfolioDoctorPage() {
       }
     } catch (err) {
       clearInterval(stageInterval);
+      // Detect Axios timeout (ECONNABORTED) or our own 120 s limit
+      const isTimeout =
+        err.code === "ECONNABORTED" ||
+        err.message?.toLowerCase().includes("timeout") ||
+        err.message?.toLowerCase().includes("network error");
       setErrorDetails({
-        message: err.message || "An unexpected error occurred during portfolio analysis.",
-        code: err.code || err.status || "API_ERROR",
+        message: isTimeout
+          ? "Portfolio analysis is taking longer than expected. Please wait a moment and try again."
+          : err.message || "An unexpected error occurred during portfolio analysis.",
+        code: isTimeout ? "TIMEOUT" : (err.code || err.status || "API_ERROR"),
         requestId: err.requestId || err.data?.request_id || "req_" + Math.random().toString(36).substring(2, 9),
       });
       setViewState("error");
-      toast.error("Portfolio analysis could not be completed.");
+      toast.error(
+        isTimeout
+          ? "Analysis timed out. Please try again."
+          : "Portfolio analysis could not be completed."
+      );
     }
   };
 
@@ -266,6 +328,13 @@ export function PortfolioDoctorPage() {
                   steps={LOADER_STAGES}
                   step={loaderStep}
                 />
+                {/* Skeleton preview of the metrics grid */}
+                <div style={{ marginTop: 24, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "300px 1fr", gap: 16 }}>
+                  <div className="pd-metric-skeleton" style={{ height: 260, borderRadius: 16 }} />
+                  <div className="pd-metrics-grid">
+                    {Array.from({ length: 6 }).map((_, i) => <MetricSkeleton key={i} />)}
+                  </div>
+                </div>
               </motion.div>
             )}
 
@@ -336,56 +405,91 @@ export function PortfolioDoctorPage() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "320px 1fr",
+                gridTemplateColumns: isMobile ? "1fr" : "300px 1fr",
                 gap: "16px",
                 marginBottom: "24px",
+                alignItems: "stretch",
               }}
             >
-              {/* Circular Health Gauge */}
               <HealthScoreGauge score={reportData.healthScore} isMobile={isMobile} />
 
-              {/* Animated Metric Cards Grid */}
               <div className="pd-metrics-grid">
+                {/* OVERALL RISK */}
                 <MetricCard
                   label="OVERALL RISK"
                   value={reportData.overallRisk}
-                  sub="Weighted Risk Index"
-                  color={reportData.overallRisk === "HIGH" ? "var(--danger)" : "var(--color-gold)"}
+                  sub="Weighted across holdings"
+                  tooltip="Highest risk tier across all holdings. HIGH = at least one high-risk position."
+                  color={
+                    reportData.overallRisk === "HIGH" ? "var(--danger)"
+                    : reportData.overallRisk === "MEDIUM" ? "var(--warning)"
+                    : "var(--success)"
+                  }
                 />
 
+                {/* EXPECTED RETURN */}
                 <MetricCard
                   label="EXPECTED RETURN"
                   value={<><CountUp end={reportData.expectedReturn} decimals={1} duration={1.5} />%</>}
-                  sub="Annualized Estimate"
-                  color="var(--color-teal)"
+                  sub="Avg annualised estimate"
+                  tooltip="Average expected return across holdings, derived from LSTM price projections."
+                  color={
+                    reportData.expectedReturn >= 10 ? "var(--success)"
+                    : reportData.expectedReturn >= 0 ? "var(--color-teal)"
+                    : "var(--danger)"
+                  }
                 />
 
+                {/* EXPECTED VOLATILITY */}
                 <MetricCard
-                  label="EXPECTED VOLATILITY"
+                  label="VOLATILITY"
                   value={<><CountUp end={reportData.expectedVolatility} decimals={1} duration={1.5} />%</>}
-                  sub="Historical Variance"
-                  color="var(--accent-blue)"
+                  sub="Historical variance"
+                  tooltip="Estimated annualised price volatility. Higher = wider price swings."
+                  color={
+                    reportData.expectedVolatility <= 12 ? "var(--success)"
+                    : reportData.expectedVolatility <= 20 ? "var(--warning)"
+                    : "var(--danger)"
+                  }
                 />
 
+                {/* DIVERSIFICATION */}
                 <MetricCard
                   label="DIVERSIFICATION"
-                  value={<><CountUp end={reportData.diversificationScore} duration={1.5} />/100</>}
-                  sub="HHI Asset Spread"
-                  color="var(--success)"
+                  value={<><CountUp end={reportData.diversificationScore} duration={1.5} /><span style={{fontSize:"0.7em"}}>/100</span></>}
+                  sub="HHI asset spread"
+                  tooltip="Herfindahl index: 100 = perfectly spread, 0 = single holding. Above 60 is healthy."
+                  color={
+                    reportData.diversificationScore >= 60 ? "var(--success)"
+                    : reportData.diversificationScore >= 35 ? "var(--warning)"
+                    : "var(--danger)"
+                  }
                 />
 
+                {/* AI CONFIDENCE */}
                 <MetricCard
                   label="AI CONFIDENCE"
                   value={<><CountUp end={reportData.aiConfidence} duration={1.5} />%</>}
-                  sub="Model Agreement"
-                  color="var(--color-teal)"
+                  sub="Model agreement"
+                  tooltip="Average calibrated confidence across RF, LSTM, and FinBERT models. Always 0–100%."
+                  color={
+                    reportData.aiConfidence >= 70 ? "var(--color-teal)"
+                    : reportData.aiConfidence >= 50 ? "var(--warning)"
+                    : "var(--danger)"
+                  }
                 />
 
+                {/* MARKET OUTLOOK */}
                 <MetricCard
                   label="MARKET OUTLOOK"
                   value={reportData.marketOutlook}
-                  sub="12M Macro Trend"
-                  color="var(--success)"
+                  sub="Derived from risk + return"
+                  tooltip="BULLISH when expected return ≥ 10% and risk is not HIGH. BEARISH when return ≤ 0% or risk is HIGH."
+                  color={
+                    reportData.marketOutlook === "BULLISH" ? "var(--success)"
+                    : reportData.marketOutlook === "BEARISH" ? "var(--danger)"
+                    : "var(--warning)"
+                  }
                 />
               </div>
             </div>

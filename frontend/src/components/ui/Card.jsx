@@ -117,9 +117,9 @@ export function ActionCard(props)    { return <Card variant="action"    {...prop
 export function FeatureCard(props)   { return <Card variant="feature"   {...props} />; }
 
 /* ── MetricCard (re-exported from Card for ergonomics) ── */
-export function MetricCard({ label, value, sub, color = "var(--color-teal)", trend }) {
+export function MetricCard({ label, value, sub, color = "var(--color-teal)", trend, tooltip }) {
   return (
-    <Card style={{ padding: "16px 14px", textAlign: "center" }}>
+    <Card style={{ padding: "14px 12px", textAlign: "center", minHeight: "110px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
       {/* Top accent line */}
       <div
         style={{
@@ -129,7 +129,7 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
           right: 0,
           height: 2,
           background: color,
-          opacity: 0.55,
+          opacity: 0.65,
           borderRadius: "var(--radius-card) var(--radius-card) 0 0",
         }}
       />
@@ -149,15 +149,34 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
         </div>
       )}
 
+      {/* Tooltip icon */}
+      {tooltip && (
+        <div
+          title={tooltip}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: trend ? 22 : 8,
+            fontSize: 11,
+            color: "var(--text-muted)",
+            cursor: "help",
+            lineHeight: 1,
+          }}
+        >
+          ⓘ
+        </div>
+      )}
+
       <div
         className="typo-mono"
         style={{
-          fontSize: "22px",
+          fontSize: "20px",
           fontWeight: 700,
           color,
-          marginBottom: "4px",
-          marginTop: 6,
+          marginBottom: "3px",
+          marginTop: 4,
           fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.2,
         }}
       >
         {value}
@@ -176,7 +195,7 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
       </div>
 
       {sub && (
-        <div style={{ fontSize: "9.5px", color: "var(--text-secondary)", marginTop: "3px", lineHeight: 1.4 }}>
+        <div style={{ fontSize: "9px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.3 }}>
           {sub}
         </div>
       )}

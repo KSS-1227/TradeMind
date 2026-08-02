@@ -89,11 +89,19 @@ export const calculateWealthProjection = async (payload) => {
 
 export const analyzePortfolio = async (holdings) => {
   try {
-    const response = await apiClient.post(ENDPOINTS.V2_PORTFOLIO_ANALYZE, { holdings });
+    const response = await apiClient.post(
+      ENDPOINTS.V2_PORTFOLIO_ANALYZE,
+      { holdings },
+      { timeout: 120000 },
+    );
     return unwrapV2(response);
   } catch (err) {
     if (err.status === 404) {
-      const fallback = await apiClient.post(ENDPOINTS.PORTFOLIO_ANALYZE, { holdings });
+      const fallback = await apiClient.post(
+        ENDPOINTS.PORTFOLIO_ANALYZE,
+        { holdings },
+        { timeout: 120000 },
+      );
       return fallback.data;
     }
     throw err;
