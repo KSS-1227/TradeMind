@@ -6,7 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from langchain_core.tools import tool
 from langchain.agents import create_agent
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 from agents.pipeline import run_pipeline
 from ml.screener import screen_stocks
@@ -94,9 +94,7 @@ TOOLS = [get_stock_signal, screen_stocks_by_criteria, get_current_price]
 
 _agent = None  # built lazily on first real query, not at import time —
                 # importing this module must not crash a server that
-                # simply doesn't have OPENAI_API_KEY set yet (same
-                # reasoning as notifications/whatsapp.py's lazy credential
-                # read).
+                # simply doesn't have GEMINI_API_KEY set yet.
 
 
 def _get_agent():
@@ -104,16 +102,20 @@ def _get_agent():
     if _agent is not None:
         return _agent
 
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError(
-            "OPENAI_API_KEY not set. Get a key from platform.openai.com, "
+            "GEMINI_API_KEY not set. Get a key from https://aistudio.google.com/app/apikey, "
             "then set it as an environment variable (locally) or a "
             "Secret (Hugging Face Space settings) — same setup pattern "
             "as TWILIO_ACCOUNT_SID."
         )
 
-    llm = ChatOpenAI(model="gpt-4o-mini", api_key=api_key, temperature=0)
+    llm = ChatGoogleGenerativeAI(
+        model=os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        google_api_key=api_key,
+        temperature=0,
+    )
     _agent = create_agent(model=llm, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
     return _agent
 

@@ -31,31 +31,27 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 try:
-    from openai import (
-        OpenAI,
-        APIConnectionError,
-        APITimeoutError,
-        APIStatusError,
-        RateLimitError,
+    import google.generativeai as genai
+    from google.api_core.exceptions import (
+        DeadlineExceeded,
+        ResourceExhausted,
+        ServiceUnavailable,
     )
+    _GENAI_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised when the package is absent
-    OpenAI = None
+    genai = None  # type: ignore[assignment]
+    _GENAI_AVAILABLE = False
 
-    class APIConnectionError(Exception):
+    class DeadlineExceeded(Exception):
         pass
 
-    class APITimeoutError(Exception):
+    class ResourceExhausted(Exception):
         pass
 
-    class APIStatusError(Exception):
-        def __init__(self, *args, **kwargs):
-            self.status_code = kwargs.get("status_code")
-            super().__init__(*args)
-
-    class RateLimitError(Exception):
+    class ServiceUnavailable(Exception):
         pass
 
 from .models import PortfolioAIReport
@@ -64,23 +60,35 @@ from backend.utils.logging import redact_sensitive_data
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-API_KEY = os.getenv("OPENAI_API_KEY")
+MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
 
-TIMEOUT = 20
-MAX_TOKENS = 600
+MAX_TOKENS: int = 600
 
-client: Optional[OpenAI] = None
+client: Optional[Any] = None  # google.generativeai.GenerativeModel
 
-if API_KEY:
+if _GENAI_AVAILABLE and API_KEY:
     try:
-        client = OpenAI(
-            api_key=API_KEY,
-            timeout=TIMEOUT,
+        genai.configure(api_key=API_KEY)
+        client = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            generation_config=genai.GenerationConfig(
+                temperature=0,
+                max_output_tokens=MAX_TOKENS,
+                response_mime_type="application/json",
+            ),
+        )
+        logger.info(
+            "portfolio_ai.llm_explainer.initialized",
+            extra={"model": MODEL_NAME},
         )
     except Exception:
         logger.exception("Portfolio AI initialization failed.")
         client = None
+else:
+    logger.warning(
+        "portfolio_ai.llm_explainer.no_api_key — using deterministic fallback."
+    )
 
 
 # ---------------------------------------------------------
@@ -118,14 +126,23 @@ def generate_portfolio_report(
     prompt = build_portfolio_prompt(analysis)
 
     try:
-        response = client.responses.create(
-            model=MODEL_NAME,
-            input=prompt,
-            temperature=0,
-            max_output_tokens=MAX_TOKENS,
-        )
+        response = client.generate_content(prompt)
 
-        text = response.output_text.strip()
+        text = getattr(response, "text", None)
+        if not text:
+            # Walk candidates as a fallback
+            for candidate in getattr(response, "candidates", []):
+                for part in getattr(candidate.content, "parts", []):
+                    if getattr(part, "text", None):
+                        text = part.text
+                        break
+                if text:
+                    break
+
+        if not text:
+            raise ValueError("Gemini API returned no text output.")
+
+        text = text.strip()
         logger.info(
             "portfolio_ai.explanation_generated",
             extra={"model": MODEL_NAME, "output_length": len(text)},
@@ -133,19 +150,16 @@ def generate_portfolio_report(
         return _parse_response(text)
 
     except (
-        APIConnectionError,
-        APITimeoutError,
-        APIStatusError,
-        RateLimitError,
+        DeadlineExceeded,
+        ResourceExhausted,
+        ServiceUnavailable,
         ValueError,
         Exception,
     ):
-
         logger.exception(
             "Portfolio AI explanation failed.",
             extra={"model": MODEL_NAME, "prompt_length": len(prompt)},
         )
-
         return _fallback_report(analysis)
 
 

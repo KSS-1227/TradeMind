@@ -4,7 +4,7 @@ llm_explainer.py
 TradeMind AI Explanation Engine
 
 Converts deterministic scam detection results into clear,
-human-readable explanations using the OpenAI Responses API
+human-readable explanations using the Google Gemini API
 with structured JSON output.
 
 IMPORTANT — Architecture Contract
@@ -17,13 +17,6 @@ The LLM NEVER decides whether something is a scam.
   Recommendation    ┘
 
 The LLM only explains those pre-computed findings.
-
-Structured Output
------------------
-The SDK's json_schema output format constrains the model to emit
-exactly the AIExplanation schema — no markdown fences, no invalid
-JSON, no schema drift. The model is guaranteed to return the
-correct shape before the response leaves the API.
 
 Public API
 ----------
@@ -41,28 +34,24 @@ import os
 from typing import Any, Dict, List, Optional
 
 try:
-    from openai import (
-        APIConnectionError,
-        APIStatusError,
-        APITimeoutError,
-        OpenAI,
-        RateLimitError,
+    import google.generativeai as genai
+    from google.api_core.exceptions import (
+        DeadlineExceeded,
+        ResourceExhausted,
+        ServiceUnavailable,
     )
+    _GENAI_AVAILABLE = True
 except ImportError:  # pragma: no cover - exercised when the package is absent
-    OpenAI = None
+    genai = None  # type: ignore[assignment]
+    _GENAI_AVAILABLE = False
 
-    class APIConnectionError(Exception):
+    class DeadlineExceeded(Exception):
         pass
 
-    class APIStatusError(Exception):
-        def __init__(self, *args, **kwargs):
-            self.status_code = kwargs.get("status_code")
-            super().__init__(*args)
-
-    class APITimeoutError(Exception):
+    class ResourceExhausted(Exception):
         pass
 
-    class RateLimitError(Exception):
+    class ServiceUnavailable(Exception):
         pass
 
 from .models import AIExplanation, ScamEvidence
@@ -79,45 +68,28 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------
 
-MODEL_NAME: str = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
-API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
 
-TIMEOUT: int = 20
 MAX_TOKENS: int = 512
-
-# ---------------------------------------------------------
-# JSON Schema for Structured Output
-#
-# Mirrors AIExplanation exactly. Passed to the Responses API
-# so the model is constrained to emit this shape — no
-# post-processing or fence-stripping needed.
-# ---------------------------------------------------------
-
-
-def _model_json_schema() -> Dict[str, Any]:
-    """Return the Pydantic schema across supported Pydantic versions."""
-
-    schema_method = getattr(AIExplanation, "model_json_schema", None)
-    if schema_method is not None:
-        return schema_method()
-    return AIExplanation.schema()
-
-
-_AI_EXPLANATION_SCHEMA: Dict[str, Any] = {
-    "name": "ai_explanation",
-    "strict": True,
-    "schema": _model_json_schema(),
-}
 
 # ---------------------------------------------------------
 # Client Initialisation (module-level, eager)
 # ---------------------------------------------------------
 
-client: Optional[OpenAI] = None
+client: Optional[Any] = None  # google.generativeai.GenerativeModel
 
-if API_KEY:
+if _GENAI_AVAILABLE and API_KEY:
     try:
-        client = OpenAI(api_key=API_KEY, timeout=TIMEOUT)
+        genai.configure(api_key=API_KEY)
+        client = genai.GenerativeModel(
+            model_name=MODEL_NAME,
+            generation_config=genai.GenerationConfig(
+                temperature=0,
+                max_output_tokens=MAX_TOKENS,
+                response_mime_type="application/json",
+            ),
+        )
         logger.info(
             "llm_explainer.initialized",
             extra={"model": MODEL_NAME},
@@ -137,7 +109,7 @@ else:
 
 
 def llm_available() -> bool:
-    """Return True when the OpenAI client is ready."""
+    """Return True when the Gemini client is ready."""
     return client is not None
 
 
@@ -156,9 +128,9 @@ def generate_explanation(
 ) -> AIExplanation:
     """Generate a plain-English explanation of pre-computed scam findings.
 
-    Uses the Responses API with a strict JSON schema so the model is
-    constrained to emit a valid AIExplanation — no markdown, no fences,
-    no schema drift.
+    Uses the Gemini API with response_mime_type="application/json" so the
+    model is constrained to emit valid JSON. temperature=0 for deterministic,
+    reproducible output.
 
     On any failure (missing key, timeout, rate limit, invalid JSON,
     network error) returns a deterministic fallback. The API never
@@ -199,7 +171,7 @@ def generate_explanation(
     )
 
     try:
-        raw_text = _call_responses_api(prompt)
+        raw_text = _call_gemini_api(prompt)
         explanation = _parse_json_response(raw_text)
         logger.info(
             "llm_explainer.success",
@@ -207,20 +179,14 @@ def generate_explanation(
         )
         return explanation
 
-    except RateLimitError:
+    except ResourceExhausted:
         logger.warning("llm_explainer.rate_limit — falling back.", extra={"model": MODEL_NAME})
 
-    except APITimeoutError:
+    except DeadlineExceeded:
         logger.warning("llm_explainer.timeout — falling back.", extra={"model": MODEL_NAME})
 
-    except APIConnectionError:
-        logger.warning("llm_explainer.connection_error — falling back.", extra={"model": MODEL_NAME})
-
-    except APIStatusError as exc:
-        logger.warning(
-            "llm_explainer.api_status_error",
-            extra={"status_code": exc.status_code, "message": redact_sensitive_data(str(exc)), "model": MODEL_NAME},
-        )
+    except ServiceUnavailable:
+        logger.warning("llm_explainer.service_unavailable — falling back.", extra={"model": MODEL_NAME})
 
     except ValueError as exc:
         logger.warning(
@@ -235,51 +201,39 @@ def generate_explanation(
 
 
 # ---------------------------------------------------------
-# Private: Responses API Call with Structured Output
+# Private: Gemini API Call
 # ---------------------------------------------------------
 
 
-def _call_responses_api(prompt: str) -> str:
-    """Invoke the Responses API with a strict JSON schema.
+def _call_gemini_api(prompt: str) -> str:
+    """Invoke the Gemini API and return the text response.
 
-    The ``text`` parameter enforces the AIExplanation schema at the
-    model level — the SDK rejects any response that doesn't match
-    before it reaches this code. temperature=0 for deterministic,
-    reproducible output. No streaming.
+    response_mime_type="application/json" is set at client construction
+    so the model is constrained to emit valid JSON.
 
     Raises
     ------
-    openai.APIStatusError, RateLimitError, APITimeoutError,
-    APIConnectionError — propagated to generate_explanation().
+    google.api_core.exceptions.ResourceExhausted — rate limit
+    google.api_core.exceptions.DeadlineExceeded  — timeout
+    google.api_core.exceptions.ServiceUnavailable — service down
     ValueError — if no text output is found in the response.
     """
 
     assert client is not None  # guarded by llm_available() before call
 
-    response = client.responses.create(
-        model=MODEL_NAME,
-        input=prompt,
-        temperature=0,
-        max_output_tokens=MAX_TOKENS,
-        text={
-            "format": {
-                "type": "json_schema",
-                "json_schema": _AI_EXPLANATION_SCHEMA,
-            }
-        },
-    )
+    response = client.generate_content(prompt)
 
-    # Walk the output list for the first output_text block
-    for item in response.output:
-        for block in getattr(item, "content", []):
-            if getattr(block, "type", None) == "output_text":
-                return block.text.strip()
+    text = getattr(response, "text", None)
+    if text:
+        return text.strip()
 
-    # Convenience accessor (SDK shorthand)
-    if hasattr(response, "output_text"):
-        return response.output_text.strip()
+    # Walk candidates as a fallback
+    for candidate in getattr(response, "candidates", []):
+        for part in getattr(candidate.content, "parts", []):
+            if getattr(part, "text", None):
+                return part.text.strip()
 
-    raise ValueError("Responses API returned no text output.")
+    raise ValueError("Gemini API returned no text output.")
 
 
 # ---------------------------------------------------------
@@ -290,9 +244,8 @@ def _call_responses_api(prompt: str) -> str:
 def _parse_json_response(content: str) -> AIExplanation:
     """Parse the model's JSON output into an AIExplanation.
 
-    Structured output should prevent malformed JSON entirely.
-    Fence-stripping and schema validation are retained as a
-    defensive layer so the fallback path is never silently bypassed.
+    response_mime_type="application/json" should prevent malformed JSON.
+    Fence-stripping and schema validation are retained as a defensive layer.
 
     Raises
     ------
@@ -334,7 +287,7 @@ def _fallback_explanation(
     """Deterministic fallback used whenever the LLM cannot be reached.
 
     Draws only from pre-computed evidence — no invented content.
-    Guarantees the API never fails due to OpenAI unavailability.
+    Guarantees the API never fails due to Gemini unavailability.
     """
 
     reasoning: List[str] = []
