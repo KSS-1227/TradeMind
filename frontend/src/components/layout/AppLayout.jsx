@@ -5,14 +5,14 @@ import { TopBar } from "./TopBar";
 import { Sidebar, SIDEBAR_COLLAPSED, SIDEBAR_EXPANDED } from "./Sidebar";
 import { BottomNavigation } from "./BottomNavigation";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { useGoldPrice } from "../../hooks/useMarketData";
+import { useCommodityPrices } from "../../hooks/useMarketData";
 
 const LS_KEY = "tm_sidebar_collapsed";
 const MAIN_TRANSITION = "margin-left 0.3s cubic-bezier(0.4,0,0.2,1)";
 
 export function AppLayout() {
   const isMobile = useIsMobile();
-  const { gold } = useGoldPrice();
+  const { commodities, loading: commodityLoading } = useCommodityPrices();
   const location = useLocation();
 
   // Collapsed state — persisted in localStorage
@@ -48,7 +48,7 @@ export function AppLayout() {
 
       {/* Top bar — full width, always on top */}
       <TopBar
-        gold={gold}
+        commodities={commodities}
         isMobile={isMobile}
         onMenuClick={() => setMobileOpen(true)}
       />
@@ -85,7 +85,7 @@ export function AppLayout() {
             exit={{    opacity: 0, y: -4 }}
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
           >
-            <Outlet context={{ gold, isMobile }} />
+            <Outlet context={{ commodities, commodityLoading, isMobile }} />
           </motion.div>
         </AnimatePresence>
       </main>

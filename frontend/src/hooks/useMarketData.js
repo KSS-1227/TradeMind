@@ -1,30 +1,33 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { fetchGoldPrice, fetchStockSignal } from "../services/marketService";
+import { fetchCommodityPrices, fetchStockSignal } from "../services/marketService";
 
-export function useGoldPrice() {
-  const [gold, setGold] = useState(null);
+export function useCommodityPrices() {
+  const [commodities, setCommodities] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
-    fetchGoldPrice()
+    const refresh = () => fetchCommodityPrices()
       .then((data) => {
-        if (isMounted) setGold(data);
+        if (isMounted) setCommodities(data);
       })
       .catch((err) => {
-        console.warn("Gold price fetch error:", err.message);
+        console.warn("Commodity prices fetch error:", err.message);
       })
       .finally(() => {
         if (isMounted) setLoading(false);
       });
 
+    refresh();
+    const timer = setInterval(refresh, 5 * 60 * 1000);
     return () => {
       isMounted = false;
+      clearInterval(timer);
     };
   }, []);
 
-  return { gold, loading };
+  return { commodities, loading };
 }
 
 export function useStockSignal(symbol) {

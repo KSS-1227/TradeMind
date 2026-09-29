@@ -90,7 +90,7 @@ function GlobalSearch() {
   );
 }
 
-export function TopBar({ gold, isMobile, onMenuClick }) {
+export function TopBar({ commodities, isMobile, onMenuClick }) {
   const { user, signOut } = useAuth();
   const location = useLocation();
   const time = useCurrentTime();
@@ -211,25 +211,23 @@ export function TopBar({ gold, isMobile, onMenuClick }) {
           flexShrink: 0,
         }}
       >
-        {/* Gold ticker — desktop */}
-        {!isMobile && gold && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              padding: "0 10px",
-              borderRight: "1px solid var(--border)",
-              height: "100%",
-            }}
-          >
-            <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700, letterSpacing: "0.8px" }}>GOLD 24K</span>
-            <span
-              className="typo-mono ticker-live"
-              style={{ fontSize: 11, fontWeight: 700 }}
-            >
-              ₹{fmt(gold.current_price_10g)}
-            </span>
+        {!isMobile && commodities && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 10px", borderRight: "1px solid var(--border)", height: "100%" }}>
+            {[
+              { label: "GOLD / 10g", quote: commodities.gold },
+              { label: "SILVER / kg", quote: commodities.silver },
+            ].map(({ label, quote }) => (
+              <span
+                key={label}
+                title={`${quote?.source || "Quote unavailable"}${quote?.as_of ? ` · ${new Date(quote.as_of).toLocaleString("en-IN")}` : ""}`}
+                style={{ display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <span style={{ fontSize: 9, color: "var(--text-muted)", fontWeight: 700 }}>{label}</span>
+                <span className="typo-mono ticker-live" style={{ fontSize: 11, fontWeight: 700 }}>
+                  {quote ? `₹${fmt(quote.price_inr)}` : "—"}
+                </span>
+              </span>
+            ))}
           </div>
         )}
 

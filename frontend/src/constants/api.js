@@ -12,6 +12,7 @@ export const ENDPOINTS = {
   V2_PRICES: (symbol) => `/v2/prices/${symbol}`,
   V2_BACKTEST: (symbol) => `/v2/backtest/${symbol}`,
   V2_GOLD: "/v2/gold",
+  V2_COMMODITIES: "/v2/commodities",
   V2_SCREENER: "/v2/screener",
   V2_WEALTH_PROJECT: "/v2/wealth/project",
   V2_PORTFOLIO_ANALYZE: "/v2/portfolio/analyze",

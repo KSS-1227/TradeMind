@@ -8,8 +8,10 @@ from datetime import datetime
 import os
 import requests
 import logging
+from decimal import Decimal
 
 from data.commodity_pricing import (
+    GRAMS_PER_KILOGRAM,
     GRAMS_PER_10_GRAMS,
     rounded_inr,
     usd_per_troy_ounce_to_indian_landed_price,
@@ -227,6 +229,69 @@ def fetch_gold_price_inr() -> dict:
     except Exception as e:
         print(f"Gold price error: {e}")
         return {"error": str(e)}
+
+
+def fetch_live_commodity_prices_inr() -> dict:
+    """Fetch recent COMEX futures bars and convert them to indicative INR prices.
+
+    Yahoo Finance's intraday feed may be delayed and is not an MCX quote.
+    Prices are shown before Indian import duty, GST, and MCX basis.
+    """
+    if yf is None:
+        raise RuntimeError("Could not fetch commodity data: yfinance is unavailable")
+
+    try:
+        fx_df = yf.download("INR=X", period="5d", interval="1d", progress=False)
+        if fx_df.empty:
+            raise RuntimeError("Could not fetch USD/INR exchange-rate data")
+        if isinstance(fx_df.columns, pd.MultiIndex):
+            fx_df.columns = fx_df.columns.get_level_values(0)
+        usd_to_inr = float(fx_df["Close"].dropna().iloc[-1])
+
+        tax_free = {"import_duty_rate": Decimal("0"), "gst_rate": Decimal("0")}
+        quotes = {}
+        for name, ticker, grams, unit in (
+            ("gold", "GC=F", GRAMS_PER_10_GRAMS, "10g"),
+            ("silver", "SI=F", GRAMS_PER_KILOGRAM, "kg"),
+        ):
+            frame = yf.download(ticker, period="5d", interval="5m", progress=False)
+            if frame.empty:
+                raise RuntimeError(f"Could not fetch {name} futures data")
+            if isinstance(frame.columns, pd.MultiIndex):
+                frame.columns = frame.columns.get_level_values(0)
+
+            closes = frame["Close"].dropna().tail(60)
+            if closes.empty:
+                raise RuntimeError(f"No recent {name} futures prices are available")
+
+            history = []
+            for timestamp, usd_price in closes.items():
+                conversion = usd_per_troy_ounce_to_indian_landed_price(
+                    float(usd_price), usd_to_inr, grams, **tax_free
+                )
+                history.append({
+                    "timestamp": timestamp.isoformat(),
+                    "price_inr": rounded_inr(conversion.inr_per_display_unit),
+                })
+
+            quotes[name] = {
+                "price_inr": history[-1]["price_inr"],
+                "unit": unit,
+                "usd_per_troy_ounce": round(float(closes.iloc[-1]), 2),
+                "as_of": history[-1]["timestamp"],
+                "history": history,
+                "source": f"Yahoo Finance COMEX futures ({ticker})",
+            }
+
+        return {
+            "gold": quotes["gold"],
+            "silver": quotes["silver"],
+            "usd_to_inr": round(usd_to_inr, 4),
+            "fetched_at": datetime.now().astimezone().isoformat(),
+            "price_note": "Indicative COMEX futures equivalent; excludes local taxes and MCX basis.",
+        }
+    except Exception as exc:
+        raise RuntimeError(f"Could not fetch live commodity prices: {exc}") from exc
 
 if __name__ == "__main__":
     print("Fetching NSE stock data...")

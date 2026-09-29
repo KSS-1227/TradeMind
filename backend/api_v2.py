@@ -17,7 +17,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agents.pipeline import run_pipeline
-from data.fetch_prices import SCREENER_UNIVERSE, fetch_gold_price_inr, fetch_prices
+from data.fetch_prices import (
+    SCREENER_UNIVERSE,
+    fetch_gold_price_inr,
+    fetch_live_commodity_prices_inr,
+    fetch_prices,
+)
 from ml.backtest import run_backtest
 from ml.screener import screen_stocks
 from ml.strategy_builder import backtest_custom_rule
@@ -207,6 +212,21 @@ def gold(request: Request):
     if "error" in result:
         return error(request, status_code=503, code="GOLD_UNAVAILABLE", message=result["error"])
     return success(request, result, "Gold price fetched successfully.")
+
+
+@router.get("/commodities", response_model=ApiSuccessEnvelope)
+def commodities(request: Request):
+    try:
+        result = fetch_live_commodity_prices_inr()
+        return success(request, result, "Commodity prices fetched successfully.")
+    except RuntimeError:
+        logger.exception("v2.commodities.failed", extra={"request_id": _request_id(request)})
+        return error(
+            request,
+            status_code=503,
+            code="COMMODITIES_UNAVAILABLE",
+            message="Live commodity prices are temporarily unavailable.",
+        )
 
 
 @router.post("/screener/analyze", response_model=ApiSuccessEnvelope)

@@ -5,8 +5,9 @@ import { Eye, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { STOCK_LABELS } from "../../constants/stocks";
+import { fmt } from "../../utils/formatters";
 
-export function WatchlistSection() {
+export function WatchlistSection({ commodities }) {
   const navigate = useNavigate();
 
   const watchlist = [
@@ -48,12 +49,21 @@ export function WatchlistSection() {
     },
     {
       symbol: "GOLD24K",
-      price: "₹72,450.00",
-      change: "+1.15%",
-      isPositive: true,
-      signal: "BUY",
-      confidence: 94,
-      data: [{ v: 71500 }, { v: 71800 }, { v: 72000 }, { v: 72200 }, { v: 72450 }],
+      quoteOnly: true,
+      price: commodities?.gold ? `₹${fmt(commodities.gold.price_inr)} / 10g` : "Unavailable",
+      change: null,
+      signal: "—",
+      confidence: null,
+      data: commodities?.gold?.history?.map((point) => ({ v: point.price_inr })) || [],
+    },
+    {
+      symbol: "SILVER",
+      quoteOnly: true,
+      price: commodities?.silver ? `₹${fmt(commodities.silver.price_inr)} / kg` : "Unavailable",
+      change: null,
+      signal: "—",
+      confidence: null,
+      data: commodities?.silver?.history?.map((point) => ({ v: point.price_inr })) || [],
     },
   ];
 
@@ -108,8 +118,8 @@ export function WatchlistSection() {
             {watchlist.map((item, idx) => (
               <tr
                 key={idx}
-                onClick={() => navigate(`/screener?stock=${item.symbol}`)}
-                style={{ cursor: "pointer" }}
+                onClick={() => !item.quoteOnly && navigate(`/screener?stock=${item.symbol}`)}
+                style={{ cursor: item.quoteOnly ? "default" : "pointer" }}
               >
                 <td>
                   <div style={{ fontWeight: 700, color: "var(--text-primary)" }}>{item.symbol}</div>
@@ -123,7 +133,7 @@ export function WatchlistSection() {
                 </td>
 
                 <td>
-                  <div
+                  {item.change ? <div
                     style={{
                       fontFamily: "var(--font-mono)",
                       fontWeight: 700,
@@ -135,7 +145,7 @@ export function WatchlistSection() {
                   >
                     {item.isPositive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
                     {item.change}
-                  </div>
+                  </div> : "—"}
                 </td>
 
                 <td>
@@ -143,7 +153,7 @@ export function WatchlistSection() {
                 </td>
 
                 <td style={{ fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--color-teal)" }}>
-                  {item.confidence}%
+                  {item.confidence == null ? "—" : `${item.confidence}%`}
                 </td>
 
                 <td>

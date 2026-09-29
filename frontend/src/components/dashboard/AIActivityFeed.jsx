@@ -3,13 +3,18 @@ import { motion } from "framer-motion";
 import { Radio } from "lucide-react";
 import { Card } from "../ui/Card";
 
-export function AIActivityFeed() {
+export function AIActivityFeed({ commodities }) {
   const feed = [
     { title: "Portfolio Doctor Analysis Completed", detail: "Scanned 4 holdings with FinBERT + Random Forest model agreement", time: "Just now", color: "var(--color-teal)" },
     { title: "Scam Risk Alert Flagged", detail: "Detected 85/100 Pump & Dump pattern in WhatsApp tip", time: "2m ago", color: "var(--danger)" },
     { title: "Signal Generated for RELIANCE", detail: "Signal upgraded to BUY with 92% Random Forest confidence", time: "5m ago", color: "var(--success)" },
     { title: "Strategy Backtest Simulation Finished", detail: "2-year RSI + MACD rule executed cleanly against Nifty 50", time: "12m ago", color: "var(--color-gold)" },
-    { title: "MCX Gold 24K Price Ingested", detail: "Landed price updated: ₹72,450 / 10g (Duty + GST adjusted)", time: "18m ago", color: "var(--color-gold)" },
+    ...(commodities ? [{
+      title: "Commodity quotes refreshed",
+      detail: `Gold ₹${Number(commodities.gold?.price_inr || 0).toLocaleString("en-IN")} / 10g · Silver ₹${Number(commodities.silver?.price_inr || 0).toLocaleString("en-IN")} / kg · indicative futures feed`,
+      time: commodities.fetched_at ? new Date(commodities.fetched_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) : "Recently",
+      color: "var(--color-gold)",
+    }] : []),
   ];
 
   return (

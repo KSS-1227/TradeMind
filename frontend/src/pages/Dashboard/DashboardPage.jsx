@@ -11,7 +11,6 @@ import { PageTransition } from "../../components/animations/PageTransition";
 import { Card, MetricCard } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
-import { ErrorState } from "../../components/common/ErrorState";
 import { DashboardSkeleton } from "../../components/dashboard/DashboardSkeleton";
 import { MarketOverviewSection } from "../../components/dashboard/MarketOverviewSection";
 import { MarketHeatmap } from "../../components/dashboard/MarketHeatmap";
@@ -20,25 +19,20 @@ import { RecentAnalysesTimeline } from "../../components/dashboard/RecentAnalyse
 import { AIActivityFeed } from "../../components/dashboard/AIActivityFeed";
 import { QuickActionsSection } from "../../components/dashboard/QuickActionsSection";
 import { AssetAllocationChart } from "../../components/charts/PortfolioDoctorCharts";
-import { fetchGoldPrice } from "../../services/marketService";
 import "../../styles/dashboard.css";
 
 export function DashboardPage() {
   const navigate = useNavigate();
   const context = useOutletContext();
   const isMobile = context?.isMobile || false;
+  const commodities = context?.commodities;
+  const loading = context?.commodityLoading ?? true;
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [goldData, setGoldData] = useState(null);
   const [timeString, setTimeString] = useState("");
   const [greeting, setGreeting] = useState("Good Morning");
 
   // Load initial data and time
   useEffect(() => {
-    let isMounted = true;
-
-    // Time & Greeting setup
     const updateTime = () => {
       const now = new Date();
       const hrs = now.getHours();
@@ -55,26 +49,7 @@ export function DashboardPage() {
 
     updateTime();
     const timer = setInterval(updateTime, 1000);
-
-    // Fetch live market gold price
-    fetchGoldPrice()
-      .then((g) => {
-        if (isMounted) {
-          setGoldData(g);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (isMounted) {
-          setError(err);
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-      clearInterval(timer);
-    };
+    return () => clearInterval(timer);
   }, []);
 
   // Portfolio Snapshot Sample Data
@@ -114,18 +89,6 @@ export function DashboardPage() {
     return (
       <PageTransition>
         <DashboardSkeleton />
-      </PageTransition>
-    );
-  }
-
-  if (error) {
-    return (
-      <PageTransition>
-        <ErrorState
-          title="Dashboard Unable to Load"
-          description="Failed to connect to TradeMind backend services. Please check network connection."
-          onRetry={() => window.location.reload()}
-        />
       </PageTransition>
     );
   }
@@ -200,7 +163,7 @@ export function DashboardPage() {
         </section>
 
         {/* SECTION 3: MARKET OVERVIEW */}
-        <MarketOverviewSection goldData={goldData} />
+        <MarketOverviewSection commodities={commodities} />
 
         {/* SECTION 8: QUICK ACTIONS */}
         <QuickActionsSection />
@@ -298,15 +261,15 @@ export function DashboardPage() {
         </div>
 
         {/* SECTION 7: WATCHLIST */}
-        <WatchlistSection />
+        <WatchlistSection commodities={commodities} />
 
         {/* SECTION 9: MARKET HEATMAP */}
-        <MarketHeatmap />
+        <MarketHeatmap commodities={commodities} />
 
         {/* SECTION 6 & 10: RECENT ANALYSES & AI ACTIVITY FEED */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 1fr", gap: "20px" }}>
           <RecentAnalysesTimeline />
-          <AIActivityFeed />
+          <AIActivityFeed commodities={commodities} />
         </div>
       </div>
     </PageTransition>

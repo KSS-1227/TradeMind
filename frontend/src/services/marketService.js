@@ -48,6 +48,11 @@ export const fetchGoldPrice = async () => {
   }
 };
 
+export const fetchCommodityPrices = async () => {
+  const response = await apiClient.get(ENDPOINTS.V2_COMMODITIES, { timeout: 30000 });
+  return unwrapV2(response);
+};
+
 export const fetchBacktest = async (symbol) => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_BACKTEST(symbol));

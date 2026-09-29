@@ -6,7 +6,7 @@ import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { fmt } from "../../utils/formatters";
 
-export function MarketOverviewSection({ goldData }) {
+export function MarketOverviewSection({ commodities }) {
   // Mini sparkline data generators
   const generateSparkline = (base, isPositive = true) => {
     const points = [];
@@ -18,6 +18,13 @@ export function MarketOverviewSection({ goldData }) {
     }
     return points;
   };
+
+  const goldQuote = commodities?.gold;
+  const silverQuote = commodities?.silver;
+  const quoteHistory = (quote) => quote?.history?.map((point) => ({ val: point.price_inr })) || [];
+  const quoteTime = (quote) => quote?.as_of
+    ? new Date(quote.as_of).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })
+    : "Waiting for quote";
 
   const markets = [
     {
@@ -48,25 +55,19 @@ export function MarketOverviewSection({ goldData }) {
       status: "LIVE",
     },
     {
-      name: "GOLD 24K (MCX)",
-      value: goldData ? `₹${fmt(goldData.current_price_10g)}` : "₹72,450",
-      change: "+1.15%",
-      isPositive: true,
-      trend: "STRONG BUY",
-      sparkline: goldData?.history?.length > 0
-        ? goldData.history.map((h) => ({ val: h.Close || h.val || 72000 }))
-        : generateSparkline(72450, true),
-      status: "MCX INDIA",
+      name: "GOLD FUTURES (INR / 10g)",
+      value: goldQuote ? `₹${fmt(goldQuote.price_inr)}` : "Unavailable",
+      isPositive: null,
+      sparkline: quoteHistory(goldQuote),
+      status: `${goldQuote?.source || "Yahoo Finance"} · ${quoteTime(goldQuote)}`,
       color: "var(--color-gold)",
     },
     {
-      name: "SILVER (MCX)",
-      value: "₹84,200",
-      change: "+1.65%",
-      isPositive: true,
-      trend: "ACCUMULATE",
-      sparkline: generateSparkline(84200, true),
-      status: "MCX INDIA",
+      name: "SILVER FUTURES (INR / kg)",
+      value: silverQuote ? `₹${fmt(silverQuote.price_inr)}` : "Unavailable",
+      isPositive: null,
+      sparkline: quoteHistory(silverQuote),
+      status: `${silverQuote?.source || "Yahoo Finance"} · ${quoteTime(silverQuote)}`,
     },
     {
       name: "BITCOIN (BTC)",
@@ -122,9 +123,7 @@ export function MarketOverviewSection({ goldData }) {
                     <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.5px" }}>
                       {m.name}
                     </span>
-                    <Badge variant={m.isPositive ? "success" : "danger"} size="sm">
-                      {m.change}
-                    </Badge>
+                    {m.change && <Badge variant={m.isPositive ? "success" : "danger"} size="sm">{m.change}</Badge>}
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
@@ -132,15 +131,18 @@ export function MarketOverviewSection({ goldData }) {
                       {m.value}
                     </div>
 
-                    <div style={{ fontSize: "11px", fontWeight: 600, color: strokeColor, display: "flex", alignItems: "center", gap: 3 }}>
-                      {m.isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-                      {m.trend}
-                    </div>
+                    {m.trend && (
+                      <div style={{ fontSize: "11px", fontWeight: 600, color: strokeColor, display: "flex", alignItems: "center", gap: 3 }}>
+                        {m.isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        {m.trend}
+                      </div>
+                    )}
                   </div>
+                  {m.status && <div title={m.status} style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.status}</div>}
                 </div>
 
                 {/* Mini Recharts Sparkline */}
-                <div style={{ height: "42px", width: "100%", marginTop: "4px" }}>
+                {m.sparkline.length > 0 && <div style={{ height: "42px", width: "100%", marginTop: "4px" }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={m.sparkline} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
                       <defs>
@@ -160,7 +162,7 @@ export function MarketOverviewSection({ goldData }) {
                       />
                     </AreaChart>
                   </ResponsiveContainer>
-                </div>
+                </div>}
               </Card>
             </motion.div>
           );
