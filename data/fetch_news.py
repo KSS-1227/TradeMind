@@ -1,5 +1,6 @@
 # data/fetch_news.py
 import os
+import time
 import requests
 import yfinance as yf
 import feedparser
@@ -27,40 +28,59 @@ STOCK_NAMES = {
 
 
 def fetch_news_firecrawl(symbol: str) -> list:
-    """Fetch news headlines via Firecrawl search — reliable on cloud hosts"""
+    """Fetch news headlines via Firecrawl search — reliable on cloud hosts.
+
+    Uses limit=3 (down from 6) to halve search-credit usage per call.
+    On a 429 rate-limit response, waits 5 seconds and retries once before
+    returning an empty list so the caller can fall through to Google RSS.
+    """
     if not FIRECRAWL_API_KEY:
         return []
 
     company = STOCK_NAMES.get(symbol, symbol.replace(".NS", ""))
-    try:
-        resp = requests.post(
-            FIRECRAWL_URL,
-            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
-            json={
-                "query": f"{company} share price NSE news",
-                "limit": 6,
-                "tbs": "qdr:w",  # past week
-            },
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("data", []) or []
-        articles = []
-        for r in results:
-            title = r.get("title", "")
-            desc  = r.get("description", "")
-            url   = r.get("url", "")
-            if title:
-                articles.append({
-                    "headline": f"{title}. {desc}".strip(". "),
-                    "url": url,
-                })
-        print(f"Firecrawl: {len(articles)} headlines for {symbol}")
-        return articles
-    except Exception as e:
-        print(f"Firecrawl news error for {symbol}: {e}")
-        return []
+    for attempt in range(2):  # one retry on 429
+        try:
+            resp = requests.post(
+                FIRECRAWL_URL,
+                headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+                json={
+                    "query": f"{company} share price NSE news",
+                    "limit": 3,   # was 6 — halves search-credit spend per call
+                    "tbs": "qdr:w",  # past week
+                },
+                timeout=15,
+            )
+
+            if resp.status_code == 429:
+                if attempt == 0:
+                    print(f"Firecrawl rate limited for {symbol} — waiting 5 s")
+                    time.sleep(5)
+                    continue
+                else:
+                    print(f"Firecrawl rate limited on retry for {symbol} — skipping")
+                    return []
+
+            resp.raise_for_status()
+            data = resp.json()
+            results = data.get("data", []) or []
+            articles = []
+            for r in results:
+                title = r.get("title", "")
+                desc  = r.get("description", "")
+                url   = r.get("url", "")
+                if title:
+                    articles.append({
+                        "headline": f"{title}. {desc}".strip(". "),
+                        "url": url,
+                    })
+            print(f"Firecrawl: {len(articles)} headlines for {symbol}")
+            return articles
+
+        except Exception as e:
+            print(f"Firecrawl news error for {symbol}: {e}")
+            return []
+
+    return []
 
 
 def fetch_news(symbol: str, days: int = 7) -> list:

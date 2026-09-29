@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------
 
-MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
 
 MAX_TOKENS: int = 512

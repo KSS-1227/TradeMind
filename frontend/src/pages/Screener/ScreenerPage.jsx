@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useCallback } from "react";
 import { useSearchParams, useOutletContext } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Search } from "lucide-react";
 import { PageTransition } from "../../components/animations/PageTransition";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
@@ -12,6 +12,7 @@ import { SignalCard } from "../../components/cards/SignalCard";
 import { ScreenerFilterBar } from "../../components/screener/ScreenerFilterBar";
 import { StockCompareModal } from "../../components/screener/StockCompareModal";
 import { ScreenerStockCard } from "../../components/screener/ScreenerStockCard";
+import { StockPickerGrid } from "../../components/screener/StockPickerGrid";
 import { STOCKS } from "../../constants/stocks";
 import { fetchFullStockSignal, runScreener } from "../../services/marketService";
 import { isDemoModeEnabled } from "../../utils/demoMode";
@@ -19,6 +20,9 @@ import { parseConf } from "../../utils/formatters";
 import { toast } from "sonner";
 import "../../styles/screener.css";
 
+// ---------------------------------------------------------------------------
+// Pipeline stage labels shown in the AgentLoader while a stock is analysed
+// ---------------------------------------------------------------------------
 const SCREENER_AGENT_STAGES = [
   "Fetching NSE Market Data & Technical Indicators",
   "Evaluating RSI, MACD, and EMA Moving Averages",
@@ -27,19 +31,44 @@ const SCREENER_AGENT_STAGES = [
   "Synthesizing Model Confidence & Risk Ratings",
 ];
 
+// ---------------------------------------------------------------------------
+// View state machine
+//   "pick"    — default: show the 13-stock selection grid, nothing fetched yet
+//   "loading" — pipeline running for a single selected stock
+//   "details" — show the full SignalCard for the analysed stock
+//   "nlp"     — show NLP screener result cards
+//   "compare" — side-by-side compare overlay
+// ---------------------------------------------------------------------------
+
 export function ScreenerPage() {
   const [searchParams] = useSearchParams();
   const context = useOutletContext();
   const isMobile = context?.isMobile || false;
+
+  // The ?stock= URL param lets external links deep-link to a stock, but we
+  // deliberately do NOT auto-run on mount — the user still has to see the
+  // pick view first (unless they typed the URL manually, which is fine).
   const initialStockParam = searchParams.get("stock");
 
-  // States
-  const [searchQuery, setSearchQuery] = useState(initialStockParam || "");
+  // ----- UI state -----------------------------------------------------------
+  const [view, setView] = useState("pick"); // "pick" | "details" | "nlp" | "compare"
+  const [loading, setLoading] = useState(false);
+  const [loaderStep, setLoaderStep] = useState(0);
+  const [errorDetails, setErrorDetails] = useState(null);
+
+  // Which tile is highlighted in the picker (purely visual, no API call yet)
+  const [selectedSymbol, setSelectedSymbol] = useState(initialStockParam || null);
+
+  // Results
+  const [selectedStockSignal, setSelectedStockSignal] = useState(null);
+  const [screenedStocks, setScreenedStocks] = useState([]);
+  const [compareList, setCompareList] = useState([]);
+
+  // NLP search bar state (only used in the NLP path)
+  const [nlpQuery, setNlpQuery] = useState("");
   const [searchHistory, setSearchHistory] = useState([
-    "RELIANCE",
     "RSI below 30 and price above 50 day EMA",
-    "TCS",
-    "INFY",
+    "MACD above signal and volume above average",
   ]);
 
   const [filters, setFilters] = useState({
@@ -50,154 +79,150 @@ export function ScreenerPage() {
     minConfidence: "0",
   });
 
-  const [viewMode, setViewMode] = useState("cards"); // 'cards' | 'details' | 'compare'
-  const [loading, setLoading] = useState(false);
-  const [loaderStep, setLoaderStep] = useState(0);
-  const [errorDetails, setErrorDetails] = useState(null);
+  // ----- Helpers ------------------------------------------------------------
 
-  const [screenedStocks, setScreenedStocks] = useState([]);
-  const [selectedStockSignal, setSelectedStockSignal] = useState(null);
-  const [compareList, setCompareList] = useState([]);
+  const startLoader = () => {
+    setLoaderStep(0);
+    return setInterval(() => {
+      setLoaderStep((prev) =>
+        prev < SCREENER_AGENT_STAGES.length - 1 ? prev + 1 : prev
+      );
+    }, 350);
+  };
 
-  const normalizeAnalysis = (analysis) => analysis;
+  const stopLoader = (interval) => {
+    clearInterval(interval);
+    setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
+  };
 
-  // Run Screener Query or Fetch Stock Signal
-  const executeScreener = useCallback(async (queryStr) => {
+  // ----- Single-stock pipeline (triggered by tile click) --------------------
+
+  const analyseStock = useCallback(async (symbol) => {
+    setSelectedSymbol(symbol);
+    setErrorDetails(null);
+
+    // ---- Demo mode shortcut ------------------------------------------------
     if (isDemoModeEnabled()) {
       setLoading(true);
-      setLoaderStep(0);
-      setErrorDetails(null);
+      setView("loading");
       setTimeout(() => {
-        const demoMatches = [
-          { symbol: "RELIANCE", score: 87, sentiment: "bullish", price: 2520, signal: "BUY", rationale: "Momentum and relative strength remain supporting the setup." },
-          { symbol: "TCS", score: 81, sentiment: "neutral", price: 3720, signal: "HOLD", rationale: "Stable quality name with moderate upside and lower volatility." },
-          { symbol: "HDFCBANK", score: 84, sentiment: "bullish", price: 1745, signal: "BUY", rationale: "Strong sector breadth and improving short-term trend." },
-        ];
-        setScreenedStocks(demoMatches);
-        setSelectedStockSignal(null);
+        setSelectedStockSignal({
+          symbol,
+          signal: "BUY",
+          confidence: "87%",
+          price: 2520,
+          recommendation: "BUY",
+        });
         setLoading(false);
-        setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
-        setViewMode("cards");
-        toast.success("Demo screener results are ready.");
+        setView("details");
+        toast.success(`Demo analysis ready for ${symbol}`);
       }, 900);
       return;
     }
 
-    const q = (queryStr !== undefined ? queryStr : searchQuery).trim();
+    // ---- Real pipeline -----------------------------------------------------
     setLoading(true);
-    setLoaderStep(0);
-    setErrorDetails(null);
-
-    let stageInterval = setInterval(() => {
-      setLoaderStep((prev) => (prev < SCREENER_AGENT_STAGES.length - 1 ? prev + 1 : prev));
-    }, 350);
+    setView("loading");
+    const interval = startLoader();
 
     try {
-      if (q && !searchHistory.includes(q)) {
-        setSearchHistory((prev) => [q, ...prev.slice(0, 4)]);
-      }
+      const analysis = await fetchFullStockSignal(symbol);
+      stopLoader(interval);
+      await new Promise((r) => setTimeout(r, 300)); // let loader reach 100%
 
-      // Check if user entered a specific single stock symbol
-      const cleanUpper = q.toUpperCase();
-      const matchedSymbol = STOCKS.find((s) => s === cleanUpper || s.replace(".NS", "") === cleanUpper);
-
-      if (matchedSymbol) {
-        const analysis = await fetchFullStockSignal(matchedSymbol);
-        clearInterval(stageInterval);
-        setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        const cardItem = normalizeAnalysis(analysis);
-        setSelectedStockSignal(analysis);
-        setScreenedStocks([cardItem]);
-        setViewMode("details");
-      } else {
-        // Run NLP screener then fetch full analysis for each match
-        const screenerRes = await runScreener(q || "RSI below 50 and bullish trend");
-        clearInterval(stageInterval);
-        setLoaderStep(SCREENER_AGENT_STAGES.length - 1);
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        const matches = screenerRes?.matches ?? [];
-        if (matches.length > 0) {
-          const cards = await Promise.all(
-            matches.map(async (m) => {
-              const sym = (m.symbol || "").replace(".NS", "");
-              try {
-                const analysis = await fetchFullStockSignal(sym);
-                return normalizeAnalysis(analysis);
-              } catch {
-                // Screener match but analysis unavailable — use screener data only
-                return null;
-              }
-            })
-          );
-          const fullAnalysisCards = cards.filter(Boolean);
-          setScreenedStocks(fullAnalysisCards);
-          if (fullAnalysisCards.length < matches.length) {
-            toast.warning(`${matches.length - fullAnalysisCards.length} match(es) could not be fully analyzed and were omitted.`);
-          }
-        } else {
-          setScreenedStocks([]);
-        }
-        setViewMode("cards");
-      }
-      toast.success("AI Stock Screener execution complete!");
+      setSelectedStockSignal(analysis);
+      setView("details");
+      toast.success(`Analysis ready for ${symbol}`);
     } catch (err) {
-      clearInterval(stageInterval);
+      stopLoader(interval);
+      setErrorDetails({
+        message: err.message || `Could not analyse ${symbol}.`,
+        code: err.status || "PIPELINE_ERROR",
+      });
+      setView("pick"); // fall back to the picker so the user isn't stuck
+      toast.error(`Analysis failed for ${symbol}`);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // ----- NLP screener (triggered only by explicit Send / Enter) -------------
+
+  const runNlpScreener = useCallback(async (queryStr) => {
+    const q = (queryStr ?? nlpQuery).trim();
+    if (!q || loading) return;
+
+    setErrorDetails(null);
+
+    // Check if the query is actually a single stock symbol — if so, route to
+    // the single-stock pipeline instead of the NLP screener.
+    const cleanUpper = q.toUpperCase();
+    const matchedSymbol = STOCKS.find(
+      (s) => s === cleanUpper || s.replace(".NS", "") === cleanUpper
+    );
+    if (matchedSymbol) {
+      analyseStock(matchedSymbol.replace(".NS", ""));
+      return;
+    }
+
+    if (!searchHistory.includes(q)) {
+      setSearchHistory((prev) => [q, ...prev.slice(0, 4)]);
+    }
+
+    setLoading(true);
+    setView("loading");
+    const interval = startLoader();
+
+    try {
+      const screenerRes = await runScreener(q);
+      stopLoader(interval);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const matches = screenerRes?.matches ?? [];
+
+      if (matches.length === 0) {
+        setScreenedStocks([]);
+        setView("nlp");
+        toast.info("No stocks matched that query.");
+        return;
+      }
+
+      // Fetch full analysis for each match sequentially so we fire only one
+      // Firecrawl call at a time (matches are typically 1-5 symbols).
+      const cards = [];
+      for (const m of matches) {
+        const sym = (m.symbol || "").replace(".NS", "");
+        try {
+          const analysis = await fetchFullStockSignal(sym);
+          if (analysis) cards.push(analysis);
+        } catch {
+          // Match couldn't be fully analysed — skip silently
+        }
+      }
+
+      if (cards.length < matches.length) {
+        toast.warning(
+          `${matches.length - cards.length} match(es) couldn't be fully analysed and were omitted.`
+        );
+      }
+
+      setScreenedStocks(cards);
+      setView("nlp");
+      toast.success(`AI Screener found ${cards.length} match(es).`);
+    } catch (err) {
+      stopLoader(interval);
       setErrorDetails({
         message: err.message || "Unable to complete stock screening.",
         code: err.status || "SCREENER_ERROR",
       });
+      setView("pick");
       toast.error("Stock screening failed.");
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, searchHistory]);
+  }, [nlpQuery, loading, searchHistory, analyseStock]);
 
-  // Initial load
-  useEffect(() => {
-    executeScreener(initialStockParam || "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleFilterChange = (key, val) => {
-    setFilters({ ...filters, [key]: val });
-  };
-
-  const handleResetFilters = () => {
-    setFilters({
-      sector: "ALL",
-      marketCap: "ALL",
-      risk: "ALL",
-      rating: "ALL",
-      minConfidence: "0",
-    });
-    setSearchQuery("");
-  };
-
-  // Filter screened stocks based on filter criteria
-  const filteredStocks = screenedStocks.filter((s) => {
-    if (filters.sector !== "ALL" && s.sector !== filters.sector) return false;
-    if (filters.risk !== "ALL" && !s.overall_risk?.includes(filters.risk)) return false;
-    if (filters.rating !== "ALL" && !s.recommendation?.includes(filters.rating)) return false;
-    if (Number(filters.minConfidence) > 0 && parseConf(s.confidence) < Number(filters.minConfidence)) return false;
-    return true;
-  });
-
-  const handleCardClick = async (stock) => {
-    setLoading(true);
-    try {
-      const analysis = await fetchFullStockSignal(stock.symbol);
-      setSelectedStockSignal(analysis);
-      setViewMode("details");
-    } catch (e) {
-      toast.error("Failed to load details for " + stock.symbol);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ----- Compare helpers ----------------------------------------------------
 
   const toggleCompareStock = (stock) => {
     if (compareList.some((s) => s.symbol === stock.symbol)) {
@@ -209,14 +234,37 @@ export function ScreenerPage() {
         return;
       }
       setCompareList([...compareList, stock]);
-      toast.success(`Added ${stock.symbol} to side-by-side comparison!`);
+      toast.success(`Added ${stock.symbol} to comparison.`);
     }
   };
+
+  const handleCardClick = async (stock) => {
+    await analyseStock((stock.symbol || "").replace(".NS", ""));
+  };
+
+  // ----- Filter logic (NLP results view only) -------------------------------
+
+  const filteredStocks = screenedStocks.filter((s) => {
+    if (filters.sector !== "ALL" && s.sector !== filters.sector) return false;
+    if (filters.risk !== "ALL" && !s.overall_risk?.includes(filters.risk)) return false;
+    if (filters.rating !== "ALL" && !s.recommendation?.includes(filters.rating)) return false;
+    if (
+      Number(filters.minConfidence) > 0 &&
+      parseConf(s.confidence) < Number(filters.minConfidence)
+    )
+      return false;
+    return true;
+  });
+
+  // =========================================================================
+  // Render
+  // =========================================================================
 
   return (
     <PageTransition>
       <div style={{ maxWidth: "1280px", margin: "0 auto", paddingBottom: "40px" }}>
-        {/* SECTION 1: HERO */}
+
+        {/* ── HERO ─────────────────────────────────────────────────────────── */}
         <section className="sc-hero-header">
           <div
             style={{
@@ -239,28 +287,87 @@ export function ScreenerPage() {
           <h1 className="sc-hero-title">AI Stock Screener</h1>
 
           <p className="sc-hero-subtitle">
-            Discover AI-rated investment opportunities using ML, LSTM, FinBERT and technical analysis across NSE equities and commodities.
+            Pick a stock below or type a filter query — ML, LSTM, FinBERT and
+            Firecrawl news run only for the stock you select, one at a time.
           </p>
         </section>
 
-        {/* SECTION 2 & 3: SEARCH & FILTERS BAR */}
-        <ScreenerFilterBar
-          searchQuery={searchQuery}
-          onSearchChange={(q) => {
-            setSearchQuery(q);
-            executeScreener(q);
-          }}
-          filters={filters}
-          onFilterChange={handleFilterChange}
-          onResetFilters={handleResetFilters}
-          searchHistory={searchHistory}
-          onSelectHistory={(q) => {
-            setSearchQuery(q);
-            executeScreener(q);
-          }}
-        />
+        {/* ── NLP SEARCH BAR (always visible, submit-only) ─────────────────── */}
+        <div style={{ marginBottom: 24 }}>
+          {/* Custom inline search row — no auto-fire on change */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <Search
+                size={15}
+                color="var(--text-muted)"
+                style={{
+                  position: "absolute",
+                  left: 13,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  pointerEvents: "none",
+                }}
+              />
+              <input
+                value={nlpQuery}
+                onChange={(e) => setNlpQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") runNlpScreener(); }}
+                placeholder='NLP filter e.g. "RSI below 30 and price above 50 day EMA"'
+                disabled={loading}
+                style={{
+                  width: "100%",
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-md, 10px)",
+                  padding: "11px 13px 11px 36px",
+                  color: "var(--text-primary)",
+                  fontSize: 13,
+                  outline: "none",
+                  boxSizing: "border-box",
+                  opacity: loading ? 0.6 : 1,
+                }}
+              />
+            </div>
 
-        {/* Compare Bar Button */}
+            <button
+              onClick={() => runNlpScreener()}
+              disabled={loading || !nlpQuery.trim()}
+              style={{
+                background: "var(--color-teal)",
+                color: "#04241D",
+                border: "none",
+                borderRadius: "var(--radius-md, 10px)",
+                padding: "0 20px",
+                fontWeight: 700,
+                fontSize: 13,
+                cursor: loading || !nlpQuery.trim() ? "default" : "pointer",
+                opacity: loading || !nlpQuery.trim() ? 0.55 : 1,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Run Screener
+            </button>
+          </div>
+
+          {/* Compact filter row — only shown when NLP results are visible */}
+          {view === "nlp" && (
+            <ScreenerFilterBar
+              searchQuery={nlpQuery}
+              onSearchChange={setNlpQuery}
+              filters={filters}
+              onFilterChange={(k, v) => setFilters({ ...filters, [k]: v })}
+              onResetFilters={() => {
+                setFilters({ sector:"ALL", marketCap:"ALL", risk:"ALL", rating:"ALL", minConfidence:"0" });
+                setNlpQuery("");
+                setView("pick");
+              }}
+              searchHistory={searchHistory}
+              onSelectHistory={(q) => { setNlpQuery(q); runNlpScreener(q); }}
+            />
+          )}
+        </div>
+
+        {/* ── COMPARE BAR ──────────────────────────────────────────────────── */}
         {compareList.length > 0 && (
           <div
             style={{
@@ -271,15 +378,15 @@ export function ScreenerPage() {
               background: "var(--color-teal-bg)",
               border: "1px solid var(--color-teal-border)",
               borderRadius: "var(--radius-lg)",
-              marginBottom: "20px",
+              marginBottom: 20,
             }}
           >
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--color-teal)" }}>
-              {compareList.length} Stock(s) selected for comparison: {compareList.map((s) => s.symbol).join(", ")}
+            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--color-teal)" }}>
+              {compareList.length} stock(s) for comparison:{" "}
+              {compareList.map((s) => s.symbol).join(", ")}
             </div>
-
-            <div style={{ display: "flex", gap: "10px" }}>
-              <Button variant="primary" size="sm" onClick={() => setViewMode("compare")}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <Button variant="primary" size="sm" onClick={() => setView("compare")}>
                 Compare Side-by-Side
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setCompareList([])}>
@@ -289,7 +396,7 @@ export function ScreenerPage() {
           </div>
         )}
 
-        {/* SECTION 7 & 8: LOADING / ERROR STATES */}
+        {/* ── LOADING / ERROR ───────────────────────────────────────────────── */}
         <AnimatePresence mode="wait">
           {loading && (
             <motion.div
@@ -299,7 +406,11 @@ export function ScreenerPage() {
               exit={{ opacity: 0, y: -15 }}
             >
               <AgentLoader
-                title="Running AI Screener Pipeline..."
+                title={
+                  selectedSymbol
+                    ? `Analysing ${selectedSymbol}…`
+                    : "Running AI Screener Pipeline…"
+                }
                 steps={SCREENER_AGENT_STAGES}
                 step={loaderStep}
               />
@@ -309,36 +420,71 @@ export function ScreenerPage() {
           {errorDetails && !loading && (
             <motion.div key="error">
               <ErrorState
-                title="Screener Execution Failed"
+                title="Analysis Failed"
                 description={errorDetails.message}
                 code={errorDetails.code}
-                onRetry={() => executeScreener(searchQuery)}
+                onRetry={() =>
+                  selectedSymbol ? analyseStock(selectedSymbol) : runNlpScreener()
+                }
               />
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* SECTION 6: COMPARE STOCKS OVERLAY */}
-        {viewMode === "compare" && compareList.length > 0 && (
+        {/* ── COMPARE OVERLAY ──────────────────────────────────────────────── */}
+        {view === "compare" && compareList.length > 0 && (
           <StockCompareModal
             selectedStocks={compareList}
-            onClose={() => setViewMode("cards")}
-            onRemoveStock={(sym) => setCompareList(compareList.filter((s) => s.symbol !== sym))}
+            onClose={() => setView(selectedStockSignal ? "details" : "nlp")}
+            onRemoveStock={(sym) =>
+              setCompareList(compareList.filter((s) => s.symbol !== sym))
+            }
           />
         )}
 
-        {/* SECTION 5: SELECTED STOCK DETAILS VIEW */}
-        {viewMode === "details" && selectedStockSignal && !loading && (
+        {/* ── DEFAULT: STOCK PICKER GRID ───────────────────────────────────── */}
+        {!loading && !errorDetails && view === "pick" && (
           <motion.div
+            key="pick"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+          >
+            <StockPickerGrid
+              onSelect={analyseStock}
+              selectedSymbol={selectedSymbol}
+              disabled={loading}
+            />
+          </motion.div>
+        )}
+
+        {/* ── SINGLE-STOCK DETAILS ─────────────────────────────────────────── */}
+        {!loading && !errorDetails && view === "details" && selectedStockSignal && (
+          <motion.div
+            key="details"
             initial={{ opacity: 0, y: 15 }}
             animate={{ opacity: 1, y: 0 }}
-            style={{ marginBottom: "28px" }}
+            style={{ marginBottom: 28 }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <Button variant="secondary" size="sm" onClick={() => setViewMode("cards")}>
-                ← Back to Screener Grid
+            {/* Back + badge row */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                marginBottom: 16,
+              }}
+            >
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setView("pick");
+                  setSelectedStockSignal(null);
+                }}
+              >
+                ← Back to Stock Selection
               </Button>
-
               <Badge variant="teal">SHAP FEATURE IMPORTANCE ANALYSIS</Badge>
             </div>
 
@@ -346,26 +492,43 @@ export function ScreenerPage() {
           </motion.div>
         )}
 
-        {/* SECTION 4: RESULT CARDS GRID */}
-        {!loading && !errorDetails && viewMode !== "compare" && (
-          <div>
+        {/* ── NLP SCREENER RESULTS ─────────────────────────────────────────── */}
+        {!loading && !errorDetails && view === "nlp" && (
+          <motion.div key="nlp" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
+            {/* Back button */}
+            <div style={{ marginBottom: 14 }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setView("pick");
+                  setScreenedStocks([]);
+                  setNlpQuery("");
+                }}
+              >
+                ← Back to Stock Selection
+              </Button>
+            </div>
+
+            {/* Results header */}
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                marginBottom: "14px",
+                marginBottom: 14,
               }}
             >
-              <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.8px" }}>
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: "var(--text-muted)",
+                  letterSpacing: "0.8px",
+                }}
+              >
                 SCREENER RESULTS ({filteredStocks.length} ASSETS MATCHED)
               </div>
-
-              {viewMode === "details" && (
-                <Button variant="ghost" size="sm" onClick={() => setViewMode("cards")}>
-                  Show Grid Cards View
-                </Button>
-              )}
             </div>
 
             {filteredStocks.length === 0 ? (
@@ -395,8 +558,9 @@ export function ScreenerPage() {
                 })}
               </div>
             )}
-          </div>
+          </motion.div>
         )}
+
       </div>
     </PageTransition>
   );

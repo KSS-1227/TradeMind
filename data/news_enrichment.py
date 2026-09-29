@@ -27,8 +27,12 @@ FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 
 CACHE_DIR = Path("cache/news_articles")
 CACHE_TTL_SECONDS = 60 * 60 * 6  # 6 hours — news doesn't need minute-level freshness
-MAX_ARTICLES_PER_STOCK = 3        # cost/latency control
+MAX_ARTICLES_PER_STOCK = 1        # 1 scrape per stock — prevents rate-limit spikes when
+                                  # multiple stocks are analysed in the same session.
+                                  # FinBERT still scores all headline-only articles;
+                                  # only the top article gets full text enrichment.
 MAX_CHARS_PER_ARTICLE = 2000      # cap length fed into FinBERT
+_INTER_SCRAPE_DELAY = 1.0         # seconds to wait between consecutive scrape calls
 
 
 def _cache_key(url: str) -> str:
@@ -59,6 +63,13 @@ def get_full_article_text(article_url: str) -> str:
     /v2/scrape endpoint (same auth/style as fetch_news_firecrawl).
     Falls back to empty string on any failure — caller should then
     fall back to headline-only sentiment rather than crash the pipeline.
+
+    Rate-limit behaviour
+    --------------------
+    - Checks the 6-hour filesystem cache first; no network call if cached.
+    - Waits _INTER_SCRAPE_DELAY seconds before each live call so back-to-back
+      scrapes don't burst the Firecrawl quota.
+    - On a 429 response, waits 5 seconds and retries once before giving up.
     """
     if not article_url or not FIRECRAWL_API_KEY:
         return ""
@@ -67,22 +78,39 @@ def get_full_article_text(article_url: str) -> str:
     if cached is not None:
         return cached
 
-    try:
-        resp = requests.post(
-            FIRECRAWL_SCRAPE_URL,
-            headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
-            json={"url": article_url, "formats": ["markdown"]},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        text = (data.get("data", {}).get("markdown") or "")[:MAX_CHARS_PER_ARTICLE]
-        if text.strip():
-            _write_cache(article_url, text)
-        return text
-    except Exception as e:
-        print(f"[news_enrichment] Scrape failed for {article_url}: {e}")
-        return ""
+    # Polite delay — prevents bursting when called in a tight loop
+    time.sleep(_INTER_SCRAPE_DELAY)
+
+    for attempt in range(2):  # one retry on 429
+        try:
+            resp = requests.post(
+                FIRECRAWL_SCRAPE_URL,
+                headers={"Authorization": f"Bearer {FIRECRAWL_API_KEY}"},
+                json={"url": article_url, "formats": ["markdown"]},
+                timeout=20,
+            )
+
+            if resp.status_code == 429:
+                if attempt == 0:
+                    print(f"[news_enrichment] Rate limited — waiting 5 s before retry")
+                    time.sleep(5)
+                    continue
+                else:
+                    print(f"[news_enrichment] Rate limited on retry — skipping {article_url}")
+                    return ""
+
+            resp.raise_for_status()
+            data = resp.json()
+            text = (data.get("data", {}).get("markdown") or "")[:MAX_CHARS_PER_ARTICLE]
+            if text.strip():
+                _write_cache(article_url, text)
+            return text
+
+        except Exception as e:
+            print(f"[news_enrichment] Scrape failed for {article_url}: {e}")
+            return ""
+
+    return ""
 
 
 def enrich_articles_for_stock(
