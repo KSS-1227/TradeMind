@@ -12,10 +12,10 @@ export function ScreenerExplanationPanel({ explanation }) {
       <div className="sc-explanation-header">
         <div className="sc-explanation-title">
           <BrainCircuit size={15} color="var(--color-teal)" />
-          <span>WHY THE MODEL MADE THIS PREDICTION</span>
+          <span>TRADEMIND AI EXPLANATION</span>
         </div>
         <span className={explanation.is_fallback ? "sc-explanation-source is-fallback" : "sc-explanation-source"}>
-          {explanation.is_fallback ? "Model data" : <><Sparkles size={12} /> Gemini</>}
+          {explanation.is_fallback ? "TradeMind AI · Model data" : <><Sparkles size={12} /> TradeMind AI</>}
         </span>
       </div>
 

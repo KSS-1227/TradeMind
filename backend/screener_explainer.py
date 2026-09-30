@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import requests
@@ -16,7 +17,10 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
     """Explain an existing signal with a dedicated Gemini key, never alter it."""
     api_key = os.getenv("GEMINI_SCREENER_API_KEY")
     if not api_key:
-        return _fallback_explanation(analysis, "Dedicated Gemini screener key is not configured.")
+        return _fallback_explanation(
+            analysis,
+            "TradeMind AI is showing the available model evidence; a written explanation is unavailable.",
+        )
 
     model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-2.5-flash")
     prompt = _build_prompt(analysis)
@@ -40,24 +44,25 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
         response.raise_for_status()
         body = response.json()
         text = body["candidates"][0]["content"]["parts"][0]["text"]
-        result = _validate_report(json.loads(_strip_code_fence(text)))
+        result = _brand_report(_validate_report(json.loads(_strip_code_fence(text))))
         result["recommendations"] = [_fixed_recommendation(analysis)]
         result["is_fallback"] = False
-        result["explanation_source"] = "Gemini"
+        result["explanation_source"] = "TradeMind AI"
         return result
     except Exception as exc:
         logger.warning(
             "screener.gemini_explanation_failed",
             extra={"symbol": analysis.get("symbol"), "error": str(exc)},
         )
-        return _fallback_explanation(analysis, "Gemini explanation is temporarily unavailable.")
+        return _fallback_explanation(analysis, "TradeMind AI could not generate a written explanation right now.")
 
 
 _SYSTEM_PROMPT = """You explain an already-computed stock model result for a retail trader.
 Do not perform new analysis, change the signal, confidence, target price, or risk
 rating, and do not add trade instructions or recommend other securities. Use only
-the supplied deterministic data. Explain what the SHAP drivers and indicators
-mean, while distinguishing correlation/context from proven causation. If the data
+the supplied deterministic data. Refer to yourself as TradeMind AI. Never mention
+the underlying provider, API, or model vendor name. Explain what the SHAP drivers
+and indicators mean, while distinguishing correlation/context from proven causation. If the data
 does not support a conclusion, say so. Return JSON only with exactly these fields:
 summary (string), strengths (string array), risks (string array), recommendations
 (string array), outlook (string), confidence_note (string)."""
@@ -98,7 +103,7 @@ def _build_prompt(analysis: dict[str, Any]) -> str:
 
 def _validate_report(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict) or not isinstance(data.get("summary"), str):
-        raise ValueError("Gemini returned an invalid explanation schema.")
+        raise ValueError("Invalid explanation response schema.")
 
     def clean_list(name: str, limit: int) -> list[str]:
         value = data.get(name, [])
@@ -119,7 +124,20 @@ def _validate_report(data: Any) -> dict[str, Any]:
 def _fixed_recommendation(analysis: dict[str, Any]) -> str:
     symbol = analysis.get("symbol", "This stock")
     recommendation = analysis.get("recommendation", "Unavailable")
-    return f"Existing model signal for {symbol}: {recommendation}. Gemini does not change it."
+    return f"Existing model signal for {symbol}: {recommendation}. TradeMind AI does not change it."
+
+
+def _brand_report(report: dict[str, Any]) -> dict[str, Any]:
+    provider_pattern = re.compile(r"\b(?:Gemini|Google)\b", re.IGNORECASE)
+    for field, value in report.items():
+        if isinstance(value, str):
+            report[field] = provider_pattern.sub("TradeMind AI", value)
+        elif isinstance(value, list):
+            report[field] = [
+                provider_pattern.sub("TradeMind AI", item) if isinstance(item, str) else item
+                for item in value
+            ]
+    return report
 
 
 def _fallback_explanation(analysis: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -146,7 +164,7 @@ def _fallback_explanation(analysis: dict[str, Any], reason: str) -> dict[str, An
             "The points below come from the deterministic model output; they do not change its signal."
         ),
         "strengths": drivers[:4],
-        "risks": ["This explanation is a deterministic fallback, not a Gemini-generated interpretation."],
+        "risks": ["Written explanation is unavailable; evidence is shown directly from model results."],
         "recommendations": [_fixed_recommendation(analysis)],
         "outlook": f"The model's existing trend assessment is {analysis.get('trend', 'unavailable')}.",
         "confidence_note": (
@@ -155,7 +173,7 @@ def _fallback_explanation(analysis: dict[str, Any], reason: str) -> dict[str, An
             else "The model did not provide a confidence value."
         ),
         "is_fallback": True,
-        "explanation_source": "Deterministic fallback",
+        "explanation_source": "TradeMind AI · Model data",
     }
 
 
