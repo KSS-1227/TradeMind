@@ -28,7 +28,6 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
     model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-3.8-flash")
     prompt = _build_prompt(analysis)
     try:
-        response = None
         for attempt in range(2):
             response = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
@@ -50,15 +49,18 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
                 time.sleep(1)
                 continue
             response.raise_for_status()
-            break
+            try:
+                result = _parse_gemini_response(response)
+            except ValueError:
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
+                raise
 
-        body = response.json()
-        text = body["candidates"][0]["content"]["parts"][0]["text"]
-        result = _brand_report(_validate_report(json.loads(_strip_code_fence(text))))
-        result["recommendations"] = [_fixed_recommendation(analysis)]
-        result["is_fallback"] = False
-        result["explanation_source"] = "TradeMind AI"
-        return result
+            result["recommendations"] = [_fixed_recommendation(analysis)]
+            result["is_fallback"] = False
+            result["explanation_source"] = "TradeMind AI"
+            return result
     except Exception as exc:
         safe_error = redact_sensitive_data(f"{type(exc).__name__}: {exc}")
         safe_error = safe_error.replace(api_key, "[REDACTED]")
@@ -132,6 +134,26 @@ def _validate_report(data: Any) -> dict[str, Any]:
         "outlook": str(data.get("outlook", "")).strip()[:600],
         "confidence_note": str(data.get("confidence_note", "")).strip()[:600],
     }
+
+
+def _parse_gemini_response(response: requests.Response) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise ValueError("Gemini returned a non-JSON HTTP response body.") from exc
+
+    try:
+        text = body["candidates"][0]["content"]["parts"][0]["text"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("Gemini response did not contain explanation text.") from exc
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Gemini response contained empty explanation text.")
+
+    try:
+        report = json.loads(_strip_code_fence(text))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Gemini returned malformed explanation JSON.") from exc
+    return _brand_report(_validate_report(report))
 
 
 def _fixed_recommendation(analysis: dict[str, Any]) -> str:
