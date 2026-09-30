@@ -184,7 +184,7 @@ function calculatePortfolioVolatility(holdings, quotes) {
   return +(Math.sqrt(variance * 252) * 100).toFixed(1);
 }
 
-function applyMarketQuotes(report, quotes) {
+function applyMarketQuotes(report, quotes, fetchedAt) {
   const holdings = report.holdings.map((holding) => {
     const symbol = (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase();
     const quote = quotes[symbol];
@@ -209,6 +209,7 @@ function applyMarketQuotes(report, quotes) {
         ? (safeNum(holding.predicted_price) / Number(quote.price)) - 1
         : holding.expected_return,
       market_price_as_of: quote.as_of,
+      market_price_fetched_at: fetchedAt,
     };
   });
 
@@ -235,8 +236,10 @@ export function PortfolioDoctorPage() {
   const portfolioSymbolList = [...new Set((sourceReportData?.holdings || [])
     .map((holding) => (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase())
     .filter(Boolean))].join(",");
-  const reportQuotes = portfolioQuotes.symbols === portfolioSymbolList ? portfolioQuotes.quotes : {};
-  const reportData = sourceReportData ? applyMarketQuotes(sourceReportData, reportQuotes) : null;
+  const reportQuotes = portfolioQuotes.symbols === portfolioSymbolList ? portfolioQuotes : { quotes: {} };
+  const reportData = sourceReportData
+    ? applyMarketQuotes(sourceReportData, reportQuotes.quotes, reportQuotes.fetched_at)
+    : null;
 
   useEffect(() => {
     if (viewState !== "report" || !portfolioSymbolList) return undefined;
@@ -245,7 +248,11 @@ export function PortfolioDoctorPage() {
     const symbols = portfolioSymbolList.split(",");
     const refresh = () => fetchMarketQuotes(symbols)
       .then((data) => {
-        if (isMounted) setPortfolioQuotes({ symbols: portfolioSymbolList, quotes: data.quotes || {} });
+        if (isMounted) setPortfolioQuotes({
+          symbols: portfolioSymbolList,
+          quotes: data.quotes || {},
+          fetchedAt: data.fetched_at,
+        });
       })
       .catch((err) => console.warn("Portfolio quote fetch error:", err.message));
 

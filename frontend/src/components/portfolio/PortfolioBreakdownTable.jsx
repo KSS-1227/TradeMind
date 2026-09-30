@@ -76,6 +76,10 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
               const isExpanded = expandedRow === idx;
               const isPnlPositive = (h.pnl || 0) >= 0;
               const symbolClean = h.symbol?.replace(".NS", "");
+              const quoteDate = h.market_price_as_of ? String(h.market_price_as_of).slice(0, 10) : null;
+              const quoteFetchedAt = h.market_price_fetched_at
+                ? new Date(h.market_price_fetched_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                : null;
 
               return (
                 <React.Fragment key={idx}>
@@ -112,6 +116,11 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
                       style={{ fontFamily: "var(--font-mono)" }}
                     >
                       ₹{fmt(h.current_price || 0)}
+                      <div style={{ marginTop: "3px", color: "var(--text-muted)", fontSize: "11px", fontFamily: "var(--font-sans)", whiteSpace: "nowrap" }}>
+                        {quoteFetchedAt
+                          ? `Yahoo daily bar · ${quoteDate || "latest"} · checked ${quoteFetchedAt}`
+                          : "Analysis snapshot"}
+                      </div>
                     </td>
 
                     {/* P/L */}

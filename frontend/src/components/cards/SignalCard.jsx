@@ -326,6 +326,8 @@ export function SignalCard({ signal, isMobile }) {
                 FINBERT NLP SENTIMENT ANALYSIS
               </div>
 
+              <ScreenerExplanationPanel explanation={signal.screener_explanation} />
+
               <div style={{ display: "flex", gap: 10 }}>
                 {Object.entries(sentiment?.scores ?? {}).map(([k, v]) => {
                   const colorMap = {
@@ -348,8 +350,6 @@ export function SignalCard({ signal, isMobile }) {
                         border: "1px solid var(--border)",
                       }}
                     >
-                      <ScreenerExplanationPanel explanation={signal.screener_explanation} />
-
                       <div
                         className="mono"
                         style={{
