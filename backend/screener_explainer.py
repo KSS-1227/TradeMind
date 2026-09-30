@@ -25,7 +25,7 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
             "TradeMind AI is showing the available model evidence; a written explanation is unavailable.",
         )
 
-    model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-3.8-flash")
+    model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-3.5-flash-lite")
     prompt = _build_prompt(analysis)
     try:
         for attempt in range(2):
