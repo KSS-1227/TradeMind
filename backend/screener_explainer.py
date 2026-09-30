@@ -46,7 +46,7 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
                 timeout=20,
             )
             if response.status_code in {500, 502, 503, 504} and attempt == 0:
-                time.sleep(1)
+                time.sleep(2)
                 continue
             response.raise_for_status()
             try:
