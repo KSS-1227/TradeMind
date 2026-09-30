@@ -62,9 +62,26 @@ def fetch_news_firecrawl(symbol: str) -> list:
 
             resp.raise_for_status()
             data = resp.json()
+            if not isinstance(data, dict):
+                print(f"Firecrawl returned an unexpected response for {symbol}: {type(data).__name__}")
+                return []
+
             results = data.get("data", []) or []
+            if isinstance(results, dict):
+                results = results.get("results", []) or []
+            if not isinstance(results, list):
+                print(f"Firecrawl returned an unexpected results field for {symbol}: {type(results).__name__}")
+                return []
+
             articles = []
             for r in results:
+                if isinstance(r, str):
+                    if r.strip():
+                        articles.append({"headline": r.strip(), "url": ""})
+                    continue
+                if not isinstance(r, dict):
+                    continue
+
                 title = r.get("title", "")
                 desc  = r.get("description", "")
                 url   = r.get("url", "")

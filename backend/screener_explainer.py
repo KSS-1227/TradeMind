@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any
 
 import requests
@@ -27,23 +28,30 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
     model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-3.8-flash")
     prompt = _build_prompt(analysis)
     try:
-        response = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-            headers={"x-goog-api-key": api_key},
-            json={
-                "systemInstruction": {
-                    "parts": [{"text": _SYSTEM_PROMPT}],
+        response = None
+        for attempt in range(2):
+            response = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                headers={"x-goog-api-key": api_key},
+                json={
+                    "systemInstruction": {
+                        "parts": [{"text": _SYSTEM_PROMPT}],
+                    },
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.2,
+                        "maxOutputTokens": 700,
+                        "responseMimeType": "application/json",
+                    },
                 },
-                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 700,
-                    "responseMimeType": "application/json",
-                },
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
+                timeout=20,
+            )
+            if response.status_code in {500, 502, 503, 504} and attempt == 0:
+                time.sleep(1)
+                continue
+            response.raise_for_status()
+            break
+
         body = response.json()
         text = body["candidates"][0]["content"]["parts"][0]["text"]
         result = _brand_report(_validate_report(json.loads(_strip_code_fence(text))))
