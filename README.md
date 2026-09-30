@@ -154,6 +154,7 @@ in a different directory.
 | `OPENAI_API_KEY` | Only for `/ask` | LangChain/OpenAI question answering |
 | `GEMINI_API_KEY` | Optional | Portfolio Doctor explanations |
 | `GEMINI_SCREENER_API_KEY` | Optional | Isolated quota for ML screener explanations |
+| `GEMINI_SCREENER_MODEL` | Optional | Screener model override; defaults to `gemini-3.8-flash` |
 | `TWILIO_ACCOUNT_SID` | Only for WhatsApp | Twilio account identifier |
 | `TWILIO_AUTH_TOKEN` | Only for WhatsApp | Twilio authentication |
 | `TWILIO_WHATSAPP_FROM` | Optional | WhatsApp sender, defaults to Twilio sandbox sender |

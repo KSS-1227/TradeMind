@@ -24,7 +24,7 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
             "TradeMind AI is showing the available model evidence; a written explanation is unavailable.",
         )
 
-    model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-2.5-flash")
+    model = os.getenv("GEMINI_SCREENER_MODEL", "gemini-3.8-flash")
     prompt = _build_prompt(analysis)
     try:
         response = requests.post(
