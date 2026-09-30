@@ -26,6 +26,7 @@ export function DashboardPage() {
   const context = useOutletContext();
   const isMobile = context?.isMobile || false;
   const commodities = context?.commodities;
+  const marketQuotes = context?.marketQuotes;
   const loading = context?.commodityLoading ?? true;
 
   const [timeString, setTimeString] = useState("");
@@ -163,7 +164,7 @@ export function DashboardPage() {
         </section>
 
         {/* SECTION 3: MARKET OVERVIEW */}
-        <MarketOverviewSection commodities={commodities} />
+        <MarketOverviewSection commodities={commodities} marketQuotes={marketQuotes} />
 
         {/* SECTION 8: QUICK ACTIONS */}
         <QuickActionsSection />
@@ -261,10 +262,10 @@ export function DashboardPage() {
         </div>
 
         {/* SECTION 7: WATCHLIST */}
-        <WatchlistSection commodities={commodities} />
+        <WatchlistSection commodities={commodities} marketQuotes={marketQuotes} />
 
         {/* SECTION 9: MARKET HEATMAP */}
-        <MarketHeatmap commodities={commodities} />
+        <MarketHeatmap commodities={commodities} marketQuotes={marketQuotes} />
 
         {/* SECTION 6 & 10: RECENT ANALYSES & AI ACTIVITY FEED */}
         <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1.2fr 1fr", gap: "20px" }}>

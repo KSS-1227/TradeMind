@@ -6,78 +6,47 @@ import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { fmt } from "../../utils/formatters";
 
-export function MarketOverviewSection({ commodities }) {
-  // Mini sparkline data generators
-  const generateSparkline = (base, isPositive = true) => {
-    const points = [];
-    let current = base;
-    for (let i = 0; i < 10; i++) {
-      const change = (Math.random() - (isPositive ? 0.4 : 0.6)) * (base * 0.005);
-      current += change;
-      points.push({ val: current });
-    }
-    return points;
-  };
-
+export function MarketOverviewSection({ commodities, marketQuotes }) {
   const goldQuote = commodities?.gold;
   const silverQuote = commodities?.silver;
-  const quoteHistory = (quote) => quote?.history?.map((point) => ({ val: point.price_inr })) || [];
+  const stockQuotes = marketQuotes?.quotes || {};
+  const quoteHistory = (quote, priceKey = "price") => quote?.history?.map((point) => ({
+    val: typeof point === "number" ? point : point[priceKey],
+  })).filter((point) => Number.isFinite(point.val)) || [];
   const quoteTime = (quote) => quote?.as_of
     ? new Date(quote.as_of).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short" })
     : "Waiting for quote";
+  const formatPrice = (value, currency = "") => `${currency}${Number(value).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+  const marketCard = (name, quote, currency = "") => ({
+    name,
+    value: quote ? formatPrice(quote.price, currency) : "Unavailable",
+    change: quote?.change_percent == null ? null : `${quote.change_percent > 0 ? "+" : ""}${quote.change_percent.toFixed(2)}%`,
+    isPositive: quote?.change_percent == null ? null : quote.change_percent >= 0,
+    trend: quote?.change_percent == null ? null : quote.change_percent >= 0 ? "UP" : "DOWN",
+    sparkline: quoteHistory(quote),
+    status: quote ? `Yahoo Finance · ${quoteTime(quote)}` : "Waiting for quote",
+  });
+  const commodityCard = (name, quote, color) => ({
+    name,
+    value: quote ? `₹${fmt(quote.price_inr)}` : "Unavailable",
+    change: null,
+    isPositive: null,
+    trend: null,
+    sparkline: quoteHistory(quote, "price_inr"),
+    status: quote ? `${quote.source || "Yahoo Finance"} · ${quoteTime(quote)}` : "Waiting for quote",
+    color,
+  });
 
   const markets = [
-    {
-      name: "NIFTY 50",
-      value: "24,850.40",
-      change: "+0.85%",
-      isPositive: true,
-      trend: "BULLISH",
-      sparkline: generateSparkline(24850, true),
-      status: "LIVE",
-    },
-    {
-      name: "SENSEX",
-      value: "81,320.15",
-      change: "+0.72%",
-      isPositive: true,
-      trend: "BULLISH",
-      sparkline: generateSparkline(81320, true),
-      status: "LIVE",
-    },
-    {
-      name: "BANK NIFTY",
-      value: "51,240.80",
-      change: "-0.35%",
-      isPositive: false,
-      trend: "BEARISH",
-      sparkline: generateSparkline(51240, false),
-      status: "LIVE",
-    },
-    {
-      name: "GOLD FUTURES (INR / 10g)",
-      value: goldQuote ? `₹${fmt(goldQuote.price_inr)}` : "Unavailable",
-      isPositive: null,
-      sparkline: quoteHistory(goldQuote),
-      status: `${goldQuote?.source || "Yahoo Finance"} · ${quoteTime(goldQuote)}`,
-      color: "var(--color-gold)",
-    },
-    {
-      name: "SILVER FUTURES (INR / kg)",
-      value: silverQuote ? `₹${fmt(silverQuote.price_inr)}` : "Unavailable",
-      isPositive: null,
-      sparkline: quoteHistory(silverQuote),
-      status: `${silverQuote?.source || "Yahoo Finance"} · ${quoteTime(silverQuote)}`,
-    },
-    {
-      name: "BITCOIN (BTC)",
-      value: "$64,280",
-      change: "-1.20%",
-      isPositive: false,
-      trend: "NEUTRAL",
-      sparkline: generateSparkline(64280, false),
-      status: "CRYPTO",
-    },
+    marketCard("NIFTY 50", stockQuotes["NIFTY 50"]),
+    marketCard("SENSEX", stockQuotes.SENSEX),
+    marketCard("BANK NIFTY", stockQuotes["BANK NIFTY"]),
+    commodityCard("GOLD FUTURES (INR / 10g)", goldQuote, "var(--color-gold)"),
+    commodityCard("SILVER FUTURES (INR / kg)", silverQuote),
+    marketCard("BITCOIN (BTC)", stockQuotes["BITCOIN (BTC)"], "$"),
   ];
 
   return (
@@ -92,13 +61,13 @@ export function MarketOverviewSection({ commodities }) {
       >
         <Activity size={18} color="var(--color-teal)" />
         <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
-          LIVE MARKET & COMMODITY OVERVIEW
+          MARKET & COMMODITY OVERVIEW
         </h3>
       </div>
 
       <div className="db-market-grid">
         {markets.map((m, i) => {
-          const strokeColor = m.color || (m.isPositive ? "var(--success)" : "var(--danger)");
+          const strokeColor = m.color || (m.isPositive == null ? "var(--text-muted)" : m.isPositive ? "var(--success)" : "var(--danger)");
           const gradientId = `marketGrad-${i}`;
 
           return (
@@ -120,25 +89,25 @@ export function MarketOverviewSection({ commodities }) {
               >
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                    <span style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.5px" }}>
+                    <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.5px" }}>
                       {m.name}
                     </span>
                     {m.change && <Badge variant={m.isPositive ? "success" : "danger"} size="sm">{m.change}</Badge>}
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "10px" }}>
-                    <div style={{ fontSize: "20px", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
+                    <div style={{ fontSize: "23px", fontWeight: 800, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>
                       {m.value}
                     </div>
 
                     {m.trend && (
-                      <div style={{ fontSize: "11px", fontWeight: 600, color: strokeColor, display: "flex", alignItems: "center", gap: 3 }}>
+                      <div style={{ fontSize: "12px", fontWeight: 600, color: strokeColor, display: "flex", alignItems: "center", gap: 3 }}>
                         {m.isPositive ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                         {m.trend}
                       </div>
                     )}
                   </div>
-                  {m.status && <div title={m.status} style={{ fontSize: 10, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.status}</div>}
+                  {m.status && <div title={m.status} style={{ fontSize: 12, color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.status}</div>}
                 </div>
 
                 {/* Mini Recharts Sparkline */}

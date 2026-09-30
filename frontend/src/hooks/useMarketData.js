@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { toast } from "sonner";
-import { fetchCommodityPrices, fetchStockSignal } from "../services/marketService";
+import { fetchCommodityPrices, fetchMarketQuotes, fetchStockSignal } from "../services/marketService";
 
 export function useCommodityPrices() {
   const [commodities, setCommodities] = useState(null);
@@ -28,6 +28,30 @@ export function useCommodityPrices() {
   }, []);
 
   return { commodities, loading };
+}
+
+export function useMarketQuotes() {
+  const [marketQuotes, setMarketQuotes] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const refresh = () => fetchMarketQuotes()
+      .then((data) => {
+        if (isMounted) setMarketQuotes(data);
+      })
+      .catch((err) => {
+        console.warn("Market quotes fetch error:", err.message);
+      });
+
+    refresh();
+    const timer = setInterval(refresh, 5 * 60 * 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return marketQuotes;
 }
 
 export function useStockSignal(symbol) {

@@ -170,7 +170,7 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
       <div
         className="typo-mono"
         style={{
-          fontSize: "20px",
+          fontSize: "24px",
           fontWeight: 700,
           color,
           marginBottom: "3px",
@@ -184,7 +184,7 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
 
       <div
         style={{
-          fontSize: "10px",
+          fontSize: "12px",
           color: "var(--text-muted)",
           letterSpacing: "0.5px",
           textTransform: "uppercase",
@@ -195,7 +195,7 @@ export function MetricCard({ label, value, sub, color = "var(--color-teal)", tre
       </div>
 
       {sub && (
-        <div style={{ fontSize: "9px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.3 }}>
+        <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginTop: "2px", lineHeight: 1.3 }}>
           {sub}
         </div>
       )}

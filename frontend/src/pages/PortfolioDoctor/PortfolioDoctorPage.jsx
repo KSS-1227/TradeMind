@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useOutletContext } from "react-router-dom";
 import CountUp from "react-countup";
 import { motion, AnimatePresence } from "framer-motion";
@@ -21,8 +21,9 @@ import {
   SectorAllocationChart,
   RiskDistributionChart,
   ExpectedGrowthChart,
+  PortfolioHistoryChart,
 } from "../../components/charts/PortfolioDoctorCharts";
-import { analyzePortfolio } from "../../services/marketService";
+import { analyzePortfolio, fetchMarketQuotes } from "../../services/marketService";
 import { toast } from "sonner";
 import { isDemoModeEnabled } from "../../utils/demoMode";
 import "../../styles/portfolio-doctor.css";
@@ -143,6 +144,50 @@ function computeReport(rawHoldings, requestId, aiReport) {
   };
 }
 
+function applyMarketQuotes(report, quotes) {
+  const holdings = report.holdings.map((holding) => {
+    const symbol = (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase();
+    const quote = quotes[symbol];
+    if (!quote || !Number.isFinite(Number(quote.price))) return holding;
+
+    const quantity = safeNum(holding.quantity);
+    const investedAmount = safeNum(
+      holding.invested_amount,
+      quantity * safeNum(holding.buy_price)
+    );
+    const marketValue = quantity * Number(quote.price);
+    const pnl = marketValue - investedAmount;
+
+    return {
+      ...holding,
+      current_price: Number(quote.price),
+      market_value: marketValue,
+      invested_amount: investedAmount,
+      pnl,
+      pnl_percent: investedAmount > 0 ? +((pnl / investedAmount) * 100).toFixed(2) : 0,
+      market_price_as_of: quote.as_of,
+    };
+  });
+
+  const totalInvested = holdings.reduce((sum, holding) => sum + safeNum(holding.invested_amount), 0);
+  const totalMarketValue = holdings.reduce((sum, holding) => sum + safeNum(holding.market_value), 0);
+  const totalPnl = totalMarketValue - totalInvested;
+
+  return {
+    ...report,
+    holdings: holdings.map((holding) => ({
+      ...holding,
+      weight: totalMarketValue > 0
+        ? Math.round((safeNum(holding.market_value) / totalMarketValue) * 100)
+        : holding.weight,
+    })),
+    totalInvested,
+    totalMarketValue,
+    totalPnl,
+    totalPnlPct: totalInvested > 0 ? +((totalPnl / totalInvested) * 100).toFixed(1) : 0,
+  };
+}
+
 export function PortfolioDoctorPage() {
   const context = useOutletContext();
   const isMobile = context?.isMobile || false;
@@ -152,9 +197,34 @@ export function PortfolioDoctorPage() {
   // States: 'input' | 'loading' | 'report' | 'error'
   const [viewState, setViewState] = useState("input");
   const [loaderStep, setLoaderStep] = useState(0);
-  const [reportData, setReportData] = useState(null);
+  const [sourceReportData, setSourceReportData] = useState(null);
+  const [portfolioQuotes, setPortfolioQuotes] = useState({ symbols: "", quotes: {} });
   const [errorDetails, setErrorDetails] = useState(null);
   const [lastSubmittedHoldings, setLastSubmittedHoldings] = useState([]);
+  const portfolioSymbolList = [...new Set((sourceReportData?.holdings || [])
+    .map((holding) => (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase())
+    .filter(Boolean))].join(",");
+  const reportQuotes = portfolioQuotes.symbols === portfolioSymbolList ? portfolioQuotes.quotes : {};
+  const reportData = sourceReportData ? applyMarketQuotes(sourceReportData, reportQuotes) : null;
+
+  useEffect(() => {
+    if (viewState !== "report" || !portfolioSymbolList) return undefined;
+
+    let isMounted = true;
+    const symbols = portfolioSymbolList.split(",");
+    const refresh = () => fetchMarketQuotes(symbols)
+      .then((data) => {
+        if (isMounted) setPortfolioQuotes({ symbols: portfolioSymbolList, quotes: data.quotes || {} });
+      })
+      .catch((err) => console.warn("Portfolio quote fetch error:", err.message));
+
+    refresh();
+    const timer = setInterval(refresh, 5 * 60 * 1000);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+    };
+  }, [viewState, portfolioSymbolList]);
 
   // Scroll to input form
   const scrollToForm = () => {
@@ -206,7 +276,7 @@ export function PortfolioDoctorPage() {
           confidence_note: "Demo confidence is intentionally conservative and explanatory.",
         },
       };
-      setReportData(demoReport);
+      setSourceReportData(demoReport);
       setViewState("report");
       toast.success("Demo portfolio analysis is ready.");
       return;
@@ -244,7 +314,7 @@ export function PortfolioDoctorPage() {
         const aiReport    = res.data?.ai_report || res.ai_report
           || rawHoldings.find((h) => h.ai_report)?.ai_report || null;
 
-        setReportData(computeReport(rawHoldings, requestId, aiReport));
+        setSourceReportData(computeReport(rawHoldings, requestId, aiReport));
         setViewState("report");
         toast.success("AI Portfolio Analysis completed successfully!");
       } else {
@@ -517,6 +587,7 @@ export function PortfolioDoctorPage() {
                 <AssetAllocationChart data={reportData.holdings} isMobile={isMobile} />
                 <SectorAllocationChart data={reportData.holdings} isMobile={isMobile} />
                 <RiskDistributionChart data={reportData.holdings} isMobile={isMobile} />
+                <PortfolioHistoryChart data={reportData.holdings} quotes={reportQuotes} />
                 <ExpectedGrowthChart
                   expectedReturnPct={reportData.expectedReturn}
                   initialCapital={reportData.totalMarketValue || 100000}

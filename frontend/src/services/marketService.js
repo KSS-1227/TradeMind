@@ -53,6 +53,12 @@ export const fetchCommodityPrices = async () => {
   return unwrapV2(response);
 };
 
+export const fetchMarketQuotes = async (symbols = []) => {
+  const params = symbols.length ? { symbols: symbols.join(",") } : undefined;
+  const response = await apiClient.get(ENDPOINTS.V2_MARKET_QUOTES, { timeout: 30000, params });
+  return unwrapV2(response);
+};
+
 export const fetchBacktest = async (symbol) => {
   try {
     const response = await apiClient.get(ENDPOINTS.V2_BACKTEST(symbol));

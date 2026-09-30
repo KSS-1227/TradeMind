@@ -49,10 +49,10 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
           justifyContent: "space-between",
         }}
       >
-        <h3 style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "0.5px" }}>
+        <h3 style={{ fontSize: "16px", fontWeight: 700, color: "var(--text-primary)", margin: 0, letterSpacing: "0.5px" }}>
           HOLDINGS BREAKDOWN & AI EVALUATION
         </h3>
-        <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+        <span style={{ fontSize: "12px", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
           {holdings.length} POSITIONS
         </span>
       </div>
@@ -93,10 +93,10 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
 
                     {/* Stock Name */}
                     <td>
-                      <div style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "13.5px" }}>
+                      <div style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "15px" }}>
                         {symbolClean}
                       </div>
-                      <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                      <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
                         {STOCK_LABELS[symbolClean] || "NSE Equity"}
                       </div>
                     </td>
@@ -107,7 +107,10 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
                     </td>
 
                     {/* Current Price */}
-                    <td style={{ fontFamily: "var(--font-mono)" }}>
+                    <td
+                      title={h.market_price_as_of ? `Yahoo Finance daily price · ${h.market_price_as_of}` : "Price returned by portfolio analysis"}
+                      style={{ fontFamily: "var(--font-mono)" }}
+                    >
                       ₹{fmt(h.current_price || 0)}
                     </td>
 
@@ -128,7 +131,7 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
                       </div>
                       <div
                         style={{
-                          fontSize: "11px",
+                          fontSize: "13px",
                           fontFamily: "var(--font-mono)",
                           color: isPnlPositive ? "var(--success)" : "var(--danger)",
                         }}
@@ -188,7 +191,7 @@ export function PortfolioBreakdownTable({ holdings = [] }) {
                           </div>
 
                           {/* Metadata Badges */}
-                          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "11.5px", color: "var(--text-muted)" }}>
+                          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12.5px", color: "var(--text-muted)" }}>
                             <span>
                               Confidence: <strong style={{ color: "var(--text-primary)" }}>{Math.round((h.confidence || 0.8) * 100)}%</strong>
                             </span>

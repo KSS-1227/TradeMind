@@ -22,6 +22,7 @@ from data.fetch_prices import (
     fetch_gold_price_inr,
     fetch_live_commodity_prices_inr,
     fetch_prices,
+    fetch_prices_batch,
 )
 from ml.backtest import run_backtest
 from ml.screener import screen_stocks
@@ -184,6 +185,65 @@ def prices(request: Request, symbol: str):
     rows = [{"Date": str(row["Date"])[:10], "Close": round(float(row["Close"]), 2)}
             for _, row in df.iterrows() if "Close" in row and "Date" in row]
     return success(request, {"data": rows}, "Prices fetched successfully.")
+
+
+@router.get("/market/quotes", response_model=ApiSuccessEnvelope)
+def market_quotes(request: Request, symbols: str | None = None):
+    tickers = {
+        "NIFTY 50": "^NSEI",
+        "SENSEX": "^BSESN",
+        "BANK NIFTY": "^NSEBANK",
+        "BITCOIN (BTC)": "BTC-USD",
+        "RELIANCE": "RELIANCE.NS",
+        "TCS": "TCS.NS",
+        "INFY": "INFY.NS",
+        "HDFCBANK": "HDFCBANK.NS",
+        "ICICIBANK": "ICICIBANK.NS",
+        "TATAMOTORS": "TMPV.NS",
+        "WIPRO": "WIPRO.NS",
+        "SBIN": "SBIN.NS",
+    }
+    for raw_symbol in (symbols or "").split(",")[:10]:
+        symbol = raw_symbol.strip().upper()
+        if symbol.endswith(".NS"):
+            symbol = symbol[:-3]
+        if not symbol.isascii() or not symbol.isalnum() or len(symbol) > 20:
+            continue
+        tickers[symbol] = "TMPV.NS" if symbol == "TATAMOTORS" else f"{symbol}.NS"
+
+    frames = fetch_prices_batch(list(dict.fromkeys(tickers.values())), period="3mo")
+    quotes: dict[str, dict[str, Any]] = {}
+
+    for name, ticker in tickers.items():
+        frame = frames.get(ticker)
+        if frame is None or frame.empty or "Close" not in frame:
+            continue
+
+        closes = frame["Close"].dropna().tail(5)
+        if closes.empty:
+            continue
+
+        current = float(closes.iloc[-1])
+        previous = float(closes.iloc[-2]) if len(closes) > 1 else None
+        change_percent = ((current / previous) - 1) * 100 if previous else None
+        date_column = "Date" if "Date" in frame else frame.columns[0]
+        history_frame = frame.dropna(subset=["Close"]).tail(60)
+        quotes[name] = {
+            "price": round(current, 2),
+            "change_percent": round(change_percent, 2) if change_percent is not None else None,
+            "history": [
+                {"date": str(row[date_column])[:10], "price": round(float(row["Close"]), 2)}
+                for _, row in history_frame.iterrows()
+            ],
+            "as_of": str(frame[date_column].iloc[-1]),
+            "source": "Yahoo Finance",
+        }
+
+    return success(
+        request,
+        {"quotes": quotes, "fetched_at": datetime.now(timezone.utc).isoformat()},
+        "Market quotes fetched successfully.",
+    )
 
 
 @router.get("/backtest/{symbol}", response_model=ApiSuccessEnvelope)

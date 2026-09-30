@@ -36,7 +36,7 @@ const CustomTooltip = ({ active, payload, label, unit = "%" }) => {
           borderRadius: "var(--radius-md, 10px)",
           padding: "8px 12px",
           color: "var(--text-primary)",
-          fontSize: "12px",
+          fontSize: "13px",
           boxShadow: "var(--shadow-md)",
         }}
       >
@@ -62,7 +62,7 @@ export function AssetAllocationChart({ data = [], isMobile, height = 220 }) {
     <Card variant="chart" style={{ height: "100%", minHeight: "300px" }}>
       <div
         style={{
-          fontSize: "12px",
+          fontSize: "14px",
           fontWeight: 700,
           color: "var(--color-teal)",
           letterSpacing: "0.8px",
@@ -122,7 +122,7 @@ export function SectorAllocationChart({ data = [], isMobile, height = 220 }) {
     <Card variant="chart" style={{ height: "100%", minHeight: "300px" }}>
       <div
         style={{
-          fontSize: "12px",
+          fontSize: "14px",
           fontWeight: 700,
           color: "var(--accent-blue)",
           letterSpacing: "0.8px",
@@ -135,8 +135,8 @@ export function SectorAllocationChart({ data = [], isMobile, height = 220 }) {
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-          <XAxis dataKey="sector" stroke="var(--text-muted)" fontSize={10} tickLine={false} />
-          <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} unit="%" />
+          <XAxis dataKey="sector" stroke="var(--text-muted)" fontSize={12} tickLine={false} />
+          <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} unit="%" />
           <Tooltip content={<CustomTooltip />} />
           <Bar dataKey="weight" fill="var(--accent-blue)" radius={[4, 4, 0, 0]} />
         </BarChart>
@@ -165,7 +165,7 @@ export function RiskDistributionChart({ data = [], isMobile, height = 220 }) {
     <Card variant="chart" style={{ height: "100%", minHeight: "300px" }}>
       <div
         style={{
-          fontSize: "12px",
+          fontSize: "14px",
           fontWeight: 700,
           color: "var(--color-gold)",
           letterSpacing: "0.8px",
@@ -178,8 +178,8 @@ export function RiskDistributionChart({ data = [], isMobile, height = 220 }) {
       <ResponsiveContainer width="100%" height={height}>
         <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-          <XAxis dataKey="category" stroke="var(--text-muted)" fontSize={11} tickLine={false} />
-          <YAxis stroke="var(--text-muted)" fontSize={10} tickLine={false} unit="%" />
+          <XAxis dataKey="category" stroke="var(--text-muted)" fontSize={12} tickLine={false} />
+          <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} unit="%" />
           <Tooltip content={<CustomTooltip />} />
           <Bar dataKey="weight" radius={[4, 4, 0, 0]}>
             {chartData.map((entry, index) => (
@@ -188,6 +188,82 @@ export function RiskDistributionChart({ data = [], isMobile, height = 220 }) {
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+    </Card>
+  );
+}
+
+export function PortfolioHistoryChart({ data = [], quotes = {}, height = 220 }) {
+  const histories = (data || []).map((holding) => {
+    const symbol = (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase();
+    const quoteHistory = quotes[symbol]?.history || [];
+    const prices = new Map(quoteHistory
+      .filter((point) => point?.date && Number.isFinite(Number(point.price)))
+      .map((point) => [point.date, Number(point.price)]));
+    return { quantity: Number(holding.quantity) || 0, prices };
+  }).filter((holding) => holding.quantity > 0 && holding.prices.size > 0);
+
+  const dates = histories.length
+    ? [...histories[0].prices.keys()]
+      .filter((date) => histories.every((holding) => holding.prices.has(date)))
+      .sort()
+    : [];
+  const chartData = dates.map((date) => ({
+    date,
+    value: histories.reduce((total, holding) => total + holding.quantity * holding.prices.get(date), 0),
+  }));
+
+  return (
+    <Card variant="chart" style={{ height: "100%", minHeight: "300px" }}>
+      <div
+        style={{
+          fontSize: "14px",
+          fontWeight: 700,
+          color: "var(--color-teal)",
+          letterSpacing: "0.8px",
+          textTransform: "uppercase",
+          marginBottom: "16px",
+        }}
+      >
+        3-MONTH HISTORICAL PORTFOLIO VALUE
+      </div>
+      {chartData.length > 1 ? (
+        <>
+          <div style={{ color: "var(--text-muted)", fontSize: "12px", marginBottom: "8px" }}>
+            Yahoo Finance daily bars · {histories.length} quoted positions
+          </div>
+          <ResponsiveContainer width="100%" height={height}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="portfolioHistoryGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--color-teal)" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="var(--color-teal)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+              <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={12} tickLine={false} minTickGap={24} />
+              <YAxis
+                stroke="var(--text-muted)"
+                fontSize={12}
+                tickLine={false}
+                tickFormatter={(value) => `₹${(value / 1000).toFixed(0)}k`}
+              />
+              <Tooltip content={<CustomTooltip unit=" ₹" />} />
+              <Area
+                type="monotone"
+                dataKey="value"
+                stroke="var(--color-teal)"
+                strokeWidth={2}
+                fill="url(#portfolioHistoryGradient)"
+                isAnimationActive={false}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </>
+      ) : (
+        <div style={{ minHeight: height, display: "grid", placeItems: "center", color: "var(--text-muted)", fontSize: "14px" }}>
+          Historical quotes are not available for these holdings.
+        </div>
+      )}
     </Card>
   );
 }
@@ -210,7 +286,7 @@ export function ExpectedGrowthChart({ expectedReturnPct = 12.5, initialCapital =
     <Card variant="chart" style={{ height: "100%", minHeight: "300px" }}>
       <div
         style={{
-          fontSize: "12px",
+          fontSize: "14px",
           fontWeight: 700,
           color: "var(--color-teal)",
           letterSpacing: "0.8px",
@@ -222,7 +298,7 @@ export function ExpectedGrowthChart({ expectedReturnPct = 12.5, initialCapital =
         }}
       >
         <span>PROJECTED 12-MONTH TRAJECTORY</span>
-        <span style={{ color: "var(--text-muted)", fontSize: "11px", fontWeight: 400 }}>
+        <span style={{ color: "var(--text-muted)", fontSize: "12px", fontWeight: 400 }}>
           Rate: +{expectedReturnPct}% / yr
         </span>
       </div>
@@ -235,10 +311,10 @@ export function ExpectedGrowthChart({ expectedReturnPct = 12.5, initialCapital =
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-          <XAxis dataKey="month" stroke="var(--text-muted)" fontSize={10} tickLine={false} />
+          <XAxis dataKey="month" stroke="var(--text-muted)" fontSize={12} tickLine={false} />
           <YAxis
             stroke="var(--text-muted)"
-            fontSize={10}
+            fontSize={12}
             tickLine={false}
             tickFormatter={(val) => `₹${(val / 1000).toFixed(0)}k`}
           />
@@ -261,6 +337,7 @@ const PortfolioDoctorCharts = {
   AssetAllocationChart,
   SectorAllocationChart,
   RiskDistributionChart,
+  PortfolioHistoryChart,
   ExpectedGrowthChart,
 };
 

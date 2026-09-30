@@ -7,46 +7,23 @@ import { Badge } from "../ui/Badge";
 import { STOCK_LABELS } from "../../constants/stocks";
 import { fmt } from "../../utils/formatters";
 
-export function WatchlistSection({ commodities }) {
+export function WatchlistSection({ commodities, marketQuotes }) {
   const navigate = useNavigate();
+  const quotes = marketQuotes?.quotes || {};
 
-  const watchlist = [
-    {
-      symbol: "RELIANCE",
-      price: "₹2,950.00",
-      change: "+2.40%",
-      isPositive: true,
-      signal: "BUY",
-      confidence: 92,
-      data: [{ v: 2880 }, { v: 2900 }, { v: 2890 }, { v: 2920 }, { v: 2950 }],
-    },
-    {
-      symbol: "TCS",
-      price: "₹3,820.50",
-      change: "+1.80%",
-      isPositive: true,
-      signal: "ACCUMULATE",
-      confidence: 88,
-      data: [{ v: 3750 }, { v: 3780 }, { v: 3760 }, { v: 3800 }, { v: 3820 }],
-    },
-    {
-      symbol: "INFY",
-      price: "₹1,410.20",
-      change: "-0.90%",
-      isPositive: false,
-      signal: "HOLD",
-      confidence: 76,
-      data: [{ v: 1430 }, { v: 1425 }, { v: 1420 }, { v: 1415 }, { v: 1410 }],
-    },
-    {
-      symbol: "HDFCBANK",
-      price: "₹1,560.00",
-      change: "+0.30%",
-      isPositive: true,
-      signal: "BUY",
-      confidence: 85,
-      data: [{ v: 1550 }, { v: 1555 }, { v: 1552 }, { v: 1558 }, { v: 1560 }],
-    },
+  const watchlist = ["RELIANCE", "TCS", "INFY", "HDFCBANK"].map((symbol) => {
+    const quote = quotes[symbol];
+    const changePercent = quote?.change_percent;
+    return {
+      symbol,
+      price: quote ? `₹${fmt(quote.price)}` : "Unavailable",
+      change: changePercent == null ? null : `${changePercent > 0 ? "+" : ""}${changePercent.toFixed(2)}%`,
+      isPositive: changePercent == null ? null : changePercent >= 0,
+      signal: "—",
+      confidence: null,
+      data: quote?.history?.map((point) => ({ v: point.price })) || [],
+    };
+  }).concat([
     {
       symbol: "GOLD24K",
       quoteOnly: true,
@@ -65,7 +42,7 @@ export function WatchlistSection({ commodities }) {
       confidence: null,
       data: commodities?.silver?.history?.map((point) => ({ v: point.price_inr })) || [],
     },
-  ];
+  ]);
 
   return (
     <Card style={{ marginBottom: "28px", padding: 0, overflow: "hidden" }}>
@@ -82,7 +59,7 @@ export function WatchlistSection({ commodities }) {
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <Eye size={16} color="var(--color-teal)" />
           <h3 style={{ fontSize: "14px", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
-            AI WATCHLIST & REAL-TIME SIGNALS
+            WATCHLIST & MARKET QUOTES
           </h3>
         </div>
 

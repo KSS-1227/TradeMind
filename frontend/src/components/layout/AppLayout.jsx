@@ -5,7 +5,7 @@ import { TopBar } from "./TopBar";
 import { Sidebar, SIDEBAR_COLLAPSED, SIDEBAR_EXPANDED } from "./Sidebar";
 import { BottomNavigation } from "./BottomNavigation";
 import { useIsMobile } from "../../hooks/useIsMobile";
-import { useCommodityPrices } from "../../hooks/useMarketData";
+import { useCommodityPrices, useMarketQuotes } from "../../hooks/useMarketData";
 
 const LS_KEY = "tm_sidebar_collapsed";
 const MAIN_TRANSITION = "margin-left 0.3s cubic-bezier(0.4,0,0.2,1)";
@@ -13,6 +13,7 @@ const MAIN_TRANSITION = "margin-left 0.3s cubic-bezier(0.4,0,0.2,1)";
 export function AppLayout() {
   const isMobile = useIsMobile();
   const { commodities, loading: commodityLoading } = useCommodityPrices();
+  const marketQuotes = useMarketQuotes();
   const location = useLocation();
 
   // Collapsed state — persisted in localStorage
@@ -85,7 +86,7 @@ export function AppLayout() {
             exit={{    opacity: 0, y: -4 }}
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
           >
-            <Outlet context={{ commodities, commodityLoading, isMobile }} />
+            <Outlet context={{ commodities, commodityLoading, marketQuotes, isMobile }} />
           </motion.div>
         </AnimatePresence>
       </main>

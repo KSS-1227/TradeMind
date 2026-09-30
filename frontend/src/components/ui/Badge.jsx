@@ -100,15 +100,15 @@ export function Badge({
     switch (size) {
       case "sm":
         return {
-          padding: "2px 8px",
-          fontSize: "10px",
+          padding: "3px 9px",
+          fontSize: "11px",
           iconSize: 12,
           gap: "4px",
         };
       case "lg":
         return {
           padding: "6px 14px",
-          fontSize: "13px",
+          fontSize: "14px",
           iconSize: 16,
           gap: "8px",
         };
@@ -116,7 +116,7 @@ export function Badge({
       default:
         return {
           padding: "4px 10px",
-          fontSize: "11px",
+          fontSize: "12px",
           iconSize: 14,
           gap: "6px",
         };

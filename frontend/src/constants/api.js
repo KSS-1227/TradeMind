@@ -10,6 +10,7 @@ export const ENDPOINTS = {
   V2_SIGNAL_FULL: (symbol) => `/v2/signal/full/${symbol}`,
   V2_SIGNAL: (symbol) => `/v2/signal/${symbol}`,
   V2_PRICES: (symbol) => `/v2/prices/${symbol}`,
+  V2_MARKET_QUOTES: "/v2/market/quotes",
   V2_BACKTEST: (symbol) => `/v2/backtest/${symbol}`,
   V2_GOLD: "/v2/gold",
   V2_COMMODITIES: "/v2/commodities",
