@@ -74,36 +74,43 @@ function computeReport(rawHoldings, requestId, aiReport) {
       : Math.round(100 / n),
   }));
 
-  // ── Risk ──
-  const riskCounts = { HIGH: 0, MEDIUM: 0, LOW: 0 };
-  holdingsWithWeight.forEach((h) => {
-    const r = (h.overall_risk || "").toUpperCase();
-    if (r.includes("HIGH"))   riskCounts.HIGH++;
-    else if (r.includes("MEDIUM")) riskCounts.MEDIUM++;
-    else riskCounts.LOW++;
+  // ── Risk distribution by current portfolio weight ──
+  const riskWeights = { HIGH: 0, MEDIUM: 0, LOW: 0 };
+  holdingsWithWeight.forEach((holding) => {
+    const risk = (holding.overall_risk || "MEDIUM").toUpperCase();
+    const tier = risk.includes("HIGH") ? "HIGH" : risk.includes("LOW") ? "LOW" : "MEDIUM";
+    riskWeights[tier] += safeNum(holding.weight);
   });
-  const overallRisk = riskCounts.HIGH > 0 ? "HIGH" : riskCounts.MEDIUM > 0 ? "MEDIUM" : "LOW";
+  const riskPriority = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+  const overallRisk = Object.keys(riskWeights).sort((left, right) =>
+    riskWeights[right] - riskWeights[left] || riskPriority[right] - riskPriority[left]
+  )[0];
 
-  // ── AI Confidence — backend sends 0–100 or 0–1; normalise to 0–100 ──
-  const rawConf = rawHoldings.reduce((s, h) => s + safeNum(h.confidence), 0) / n;
-  // If average > 1 it's already in percent; otherwise multiply by 100
-  const aiConfidence = clamp100(rawConf > 1 ? rawConf : rawConf * 100);
+  // Confidence is supplied as either 0–1 or 0–100 by model responses.
+  const confidenceWeight = (holding) => totalMarketValue > 0
+    ? safeNum(holding.market_value) / totalMarketValue
+    : 1 / n;
+  const aiConfidence = clamp100(rawHoldings.reduce((sum, holding) => {
+    const confidence = safeNum(holding.confidence);
+    return sum + (confidence > 1 ? confidence : confidence * 100) * confidenceWeight(holding);
+  }, 0));
 
   // ── Diversification (Herfindahl) ──
   const hhi = holdingsWithWeight.reduce((s, h) => s + Math.pow(h.weight / 100, 2), 0);
   const diversificationScore = Math.max(20, Math.round((1 - hhi) * 100));
 
   // ── Expected return & volatility from backend per-holding data ──
-  const validReturns = rawHoldings
-    .map((h) => safeNum(h.expected_return))
-    .filter((v) => v !== 0);
-  // expected_return from backend is a fraction (e.g. 0.08 = 8%)
-  const avgExpectedReturn = validReturns.length > 0
-    ? +((validReturns.reduce((s, v) => s + v, 0) / validReturns.length) * 100).toFixed(1)
-    : (overallRisk === "HIGH" ? 14.5 : overallRisk === "MEDIUM" ? 11.2 : 8.5);
-
-  const expectedVolatility = overallRisk === "HIGH" ? 22.4
-    : overallRisk === "MEDIUM" ? 14.8 : 9.6;
+  const validReturns = rawHoldings.filter((holding) =>
+    holding.expected_return != null && Number.isFinite(Number(holding.expected_return))
+  );
+  const returnWeightTotal = validReturns.reduce((sum, holding) =>
+    sum + confidenceWeight(holding), 0
+  );
+  const avgExpectedReturn = validReturns.length && returnWeightTotal > 0
+    ? +((validReturns.reduce((sum, holding) =>
+      sum + safeNum(holding.expected_return) * confidenceWeight(holding), 0
+    ) / returnWeightTotal) * 100).toFixed(1)
+    : null;
 
   // ── Health Score — composite of 5 factors, each 0–20 ──
   //   1. AI Confidence component (0–20)
@@ -113,16 +120,19 @@ function computeReport(rawHoldings, requestId, aiReport) {
   //   3. Risk component: LOW=20, MEDIUM=12, HIGH=4
   const riskComponent = overallRisk === "LOW" ? 20 : overallRisk === "MEDIUM" ? 12 : 4;
   //   4. Return component: positive return up to 20%, capped at 20
-  const retComponent = Math.min(20, Math.max(0, avgExpectedReturn));
+  const retComponent = avgExpectedReturn == null ? 0 : Math.min(20, Math.max(0, avgExpectedReturn));
   //   5. Model score component (0–20)
-  const avgModelScore = rawHoldings.reduce((s, h) => s + safeNum(h.overall_score, 5), 0) / n;
+  const avgModelScore = rawHoldings.reduce((sum, holding) =>
+    sum + safeNum(holding.overall_score, 5) * confidenceWeight(holding), 0
+  );
   const scoreComponent = Math.min(20, (avgModelScore / 10) * 20);
 
   const rawHealth = confComponent + divComponent + riskComponent + retComponent + scoreComponent;
   const healthScore = clamp100(rawHealth);
 
   // ── Market Outlook — derived from risk + return, not hardcoded ──
-  const marketOutlook = avgExpectedReturn >= 10 && overallRisk !== "HIGH" ? "BULLISH"
+  const marketOutlook = avgExpectedReturn == null ? "UNAVAILABLE"
+    : avgExpectedReturn >= 10 && overallRisk !== "HIGH" ? "BULLISH"
     : avgExpectedReturn <= 0 || overallRisk === "HIGH" ? "BEARISH"
     : "NEUTRAL";
 
@@ -135,13 +145,43 @@ function computeReport(rawHoldings, requestId, aiReport) {
     healthScore,
     overallRisk,
     expectedReturn: avgExpectedReturn,
-    expectedVolatility,
+    expectedVolatility: null,
     diversificationScore,
     aiConfidence,
     marketOutlook,
     requestId,
     ai_report: aiReport,
   };
+}
+
+function calculatePortfolioVolatility(holdings, quotes) {
+  const positions = holdings.map((holding) => {
+    const symbol = (holding.symbol || "").replace(/\.NS$/i, "").toUpperCase();
+    const history = quotes[symbol]?.history || [];
+    return {
+      quantity: safeNum(holding.quantity),
+      prices: new Map(history
+        .filter((point) => point?.date && Number.isFinite(Number(point.price)) && Number(point.price) > 0)
+        .map((point) => [point.date, Number(point.price)])),
+    };
+  });
+
+  if (!positions.length || positions.some((position) => position.prices.size < 2)) return null;
+
+  const dates = [...positions[0].prices.keys()]
+    .filter((date) => positions.every((position) => position.prices.has(date)))
+    .sort();
+  const portfolioValues = dates.map((date) => positions.reduce(
+    (total, position) => total + position.quantity * position.prices.get(date), 0
+  ));
+  const returns = portfolioValues.slice(1).map((value, index) =>
+    value / portfolioValues[index] - 1
+  ).filter(Number.isFinite);
+
+  if (returns.length < 2) return null;
+  const mean = returns.reduce((sum, value) => sum + value, 0) / returns.length;
+  const variance = returns.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / (returns.length - 1);
+  return +(Math.sqrt(variance * 252) * 100).toFixed(1);
 }
 
 function applyMarketQuotes(report, quotes) {
@@ -165,26 +205,17 @@ function applyMarketQuotes(report, quotes) {
       invested_amount: investedAmount,
       pnl,
       pnl_percent: investedAmount > 0 ? +((pnl / investedAmount) * 100).toFixed(2) : 0,
+      expected_return: safeNum(holding.predicted_price) > 0
+        ? (safeNum(holding.predicted_price) / Number(quote.price)) - 1
+        : holding.expected_return,
       market_price_as_of: quote.as_of,
     };
   });
 
-  const totalInvested = holdings.reduce((sum, holding) => sum + safeNum(holding.invested_amount), 0);
-  const totalMarketValue = holdings.reduce((sum, holding) => sum + safeNum(holding.market_value), 0);
-  const totalPnl = totalMarketValue - totalInvested;
-
+  const updatedReport = computeReport(holdings, report.requestId, report.ai_report);
   return {
-    ...report,
-    holdings: holdings.map((holding) => ({
-      ...holding,
-      weight: totalMarketValue > 0
-        ? Math.round((safeNum(holding.market_value) / totalMarketValue) * 100)
-        : holding.weight,
-    })),
-    totalInvested,
-    totalMarketValue,
-    totalPnl,
-    totalPnlPct: totalInvested > 0 ? +((totalPnl / totalInvested) * 100).toFixed(1) : 0,
+    ...updatedReport,
+    expectedVolatility: calculatePortfolioVolatility(holdings, quotes),
   };
 }
 
@@ -241,9 +272,9 @@ export function PortfolioDoctorPage() {
       setLoaderStep(0);
       setErrorDetails(null);
       const demoHoldings = [
-        { symbol: "RELIANCE.NS", quantity: 10, buy_price: 2450, current_price: 2540, invested_amount: 24500, market_value: 25400, pnl: 900, pnl_percent: 3.67, overall_risk: "LOW", overall_score: 8.4, recommendation: "BUY", confidence: 0.88, trend: "BULLISH", reasoning: ["Momentum remains constructive after a healthy pullback.", "Diversification is strong across sector leaders."] },
-        { symbol: "TCS.NS", quantity: 8, buy_price: 3850, current_price: 3720, invested_amount: 30800, market_value: 29760, pnl: -1040, pnl_percent: -3.38, overall_risk: "LOW", overall_score: 7.8, recommendation: "HOLD", confidence: 0.79, trend: "NEUTRAL", reasoning: ["Valuation remains stable while near-term growth is moderate.", "The position is suitable for steady income-oriented exposure."] },
-        { symbol: "HDFCBANK.NS", quantity: 12, buy_price: 1680, current_price: 1745, invested_amount: 20160, market_value: 20940, pnl: 780, pnl_percent: 3.87, overall_risk: "MEDIUM", overall_score: 8.1, recommendation: "ACCUMULATE", confidence: 0.84, trend: "BULLISH", reasoning: ["Banking sector momentum is positive with improving breadth.", "The allocation remains within a controlled risk band."] },
+        { symbol: "RELIANCE.NS", quantity: 10, buy_price: 2450, current_price: 2540, invested_amount: 24500, market_value: 25400, pnl: 900, pnl_percent: 3.67, overall_risk: "LOW", overall_score: 8.4, recommendation: "BUY", confidence: 0.88, expected_return: 0.06, predicted_price: 2692.4, trend: "BULLISH", reasoning: ["Momentum remains constructive after a healthy pullback.", "Diversification is strong across sector leaders."] },
+        { symbol: "TCS.NS", quantity: 8, buy_price: 3850, current_price: 3720, invested_amount: 30800, market_value: 29760, pnl: -1040, pnl_percent: -3.38, overall_risk: "LOW", overall_score: 7.8, recommendation: "HOLD", confidence: 0.79, expected_return: 0.03, predicted_price: 3831.6, trend: "NEUTRAL", reasoning: ["Valuation remains stable while near-term growth is moderate.", "The position is suitable for steady income-oriented exposure."] },
+        { symbol: "HDFCBANK.NS", quantity: 12, buy_price: 1680, current_price: 1745, invested_amount: 20160, market_value: 20940, pnl: 780, pnl_percent: 3.87, overall_risk: "MEDIUM", overall_score: 8.1, recommendation: "ACCUMULATE", confidence: 0.84, expected_return: 0.08, predicted_price: 1884.6, trend: "BULLISH", reasoning: ["Banking sector momentum is positive with improving breadth.", "The allocation remains within a controlled risk band."] },
       ];
       const totalInvested = demoHoldings.reduce((sum, h) => sum + (h.invested_amount || 0), 0);
       const totalMarketValue = demoHoldings.reduce((sum, h) => sum + (h.market_value || 0), 0);
@@ -500,9 +531,9 @@ export function PortfolioDoctorPage() {
                 {/* EXPECTED RETURN */}
                 <MetricCard
                   label="EXPECTED RETURN"
-                  value={<><CountUp end={reportData.expectedReturn} decimals={1} duration={1.5} />%</>}
-                  sub="Avg annualised estimate"
-                  tooltip="Average expected return across holdings, derived from LSTM price projections."
+                  value={reportData.expectedReturn == null ? "—" : <><CountUp end={reportData.expectedReturn} decimals={1} duration={1.5} />%</>}
+                  sub="Weighted model estimate"
+                  tooltip="Market-value-weighted expected return from the per-holding model outputs, refreshed against current Yahoo prices where a price target is available."
                   color={
                     reportData.expectedReturn >= 10 ? "var(--success)"
                     : reportData.expectedReturn >= 0 ? "var(--color-teal)"
@@ -513,9 +544,9 @@ export function PortfolioDoctorPage() {
                 {/* EXPECTED VOLATILITY */}
                 <MetricCard
                   label="VOLATILITY"
-                  value={<><CountUp end={reportData.expectedVolatility} decimals={1} duration={1.5} />%</>}
-                  sub="Historical variance"
-                  tooltip="Estimated annualised price volatility. Higher = wider price swings."
+                  value={reportData.expectedVolatility == null ? "—" : <><CountUp end={reportData.expectedVolatility} decimals={1} duration={1.5} />%</>}
+                  sub="Annualized historical volatility"
+                  tooltip="Annualized standard deviation of daily Yahoo Finance portfolio returns. Requires at least three aligned daily observations."
                   color={
                     reportData.expectedVolatility <= 12 ? "var(--success)"
                     : reportData.expectedVolatility <= 20 ? "var(--warning)"
@@ -540,8 +571,8 @@ export function PortfolioDoctorPage() {
                 <MetricCard
                   label="AI CONFIDENCE"
                   value={<><CountUp end={reportData.aiConfidence} duration={1.5} />%</>}
-                  sub="Model agreement"
-                  tooltip="Average calibrated confidence across RF, LSTM, and FinBERT models. Always 0–100%."
+                  sub="Position-weighted confidence"
+                  tooltip="Model confidence averaged across holdings using each holding's current portfolio weight."
                   color={
                     reportData.aiConfidence >= 70 ? "var(--color-teal)"
                     : reportData.aiConfidence >= 50 ? "var(--warning)"

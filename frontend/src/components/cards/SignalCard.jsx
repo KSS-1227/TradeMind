@@ -5,6 +5,7 @@ import { Badge } from "../ui/Badge";
 import { Tabs } from "../ui/Tabs";
 import { MetricCard } from "../ui/MetricCard";
 import { PriceAreaChart } from "../charts/PriceAreaChart";
+import { ScreenerExplanationPanel } from "../screener/ScreenerExplanationPanel";
 import { parseConf } from "../../utils/formatters";
 import { SIGNAL_COLORS } from "../../constants/stocks";
 import { Sparkles, Brain, AlertTriangle, Activity } from "lucide-react";
@@ -347,6 +348,8 @@ export function SignalCard({ signal, isMobile }) {
                         border: "1px solid var(--border)",
                       }}
                     >
+                      <ScreenerExplanationPanel explanation={signal.screener_explanation} />
+
                       <div
                         className="mono"
                         style={{

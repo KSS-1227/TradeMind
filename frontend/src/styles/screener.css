@@ -126,3 +126,89 @@
   color: var(--text-secondary);
   border: 1px solid var(--border-subtle);
 }
+
+.sc-explanation {
+  padding: 14px 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.sc-explanation-header,
+.sc-explanation-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sc-explanation-header {
+  justify-content: space-between;
+}
+
+.sc-explanation-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--color-teal);
+}
+
+.sc-explanation-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-teal);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sc-explanation-source.is-fallback {
+  color: var(--warning);
+}
+
+.sc-explanation-summary {
+  margin: 10px 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.sc-explanation-group {
+  margin-top: 10px;
+}
+
+.sc-explanation-group h4 {
+  margin: 0 0 5px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sc-explanation-group ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.sc-explanation-risks li::marker {
+  color: var(--warning);
+}
+
+.sc-explanation-confidence {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (max-width: 480px) {
+  .sc-explanation-title {
+    font-size: 12px;
+  }
+
+  .sc-explanation-summary {
+    font-size: 13px;
+  }
+}

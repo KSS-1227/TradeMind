@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import CountUp from "react-countup";
 import {
   Sparkles,
   ArrowRight,
@@ -8,7 +7,7 @@ import {
   Zap,
 } from "lucide-react";
 import { PageTransition } from "../../components/animations/PageTransition";
-import { Card, MetricCard } from "../../components/ui/Card";
+import { Card } from "../../components/ui/Card";
 import { Button } from "../../components/ui/Button";
 import { Badge } from "../../components/ui/Badge";
 import { DashboardSkeleton } from "../../components/dashboard/DashboardSkeleton";
@@ -113,53 +112,6 @@ export function DashboardPage() {
             <span className="db-status-badge db-status-ai">
               <Sparkles size={12} /> TRADEMIND AI ONLINE
             </span>
-          </div>
-        </section>
-
-        {/* SECTION 2: QUICK METRICS */}
-        <section style={{ marginBottom: "28px" }}>
-          <div className="db-metrics-grid">
-            <MetricCard
-              label="PORTFOLIO VALUE"
-              value={<>₹<CountUp end={425800} duration={1.5} separator="," /></>}
-              sub="₹4.25 Lakh Total"
-              color="var(--text-primary)"
-            />
-
-            <MetricCard
-              label="TODAY'S P/L"
-              value={<>+₹<CountUp end={6420} duration={1.5} separator="," /> (+1.53%)</>}
-              sub="Net Daily Gain"
-              color="var(--success)"
-            />
-
-            <MetricCard
-              label="PORTFOLIO HEALTH"
-              value={<><CountUp end={78} duration={1.5} />/100</>}
-              sub="Optimal Allocation"
-              color="var(--color-teal)"
-            />
-
-            <MetricCard
-              label="AI CONFIDENCE"
-              value={<><CountUp end={92} duration={1.5} />%</>}
-              sub="Multi-Model Agreement"
-              color="var(--color-teal)"
-            />
-
-            <MetricCard
-              label="EXPECTED RETURN"
-              value={<><CountUp end={14.2} decimals={1} duration={1.5} />%</>}
-              sub="Annualized Forecast"
-              color="var(--accent-blue)"
-            />
-
-            <MetricCard
-              label="RISK PROFILE"
-              value="LOW-MED"
-              sub="Balanced Risk Index"
-              color="var(--color-gold)"
-            />
           </div>
         </section>
 

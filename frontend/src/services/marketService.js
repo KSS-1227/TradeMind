@@ -4,8 +4,11 @@ import { ENDPOINTS } from "../constants/api";
 // Unwrap the v2 success envelope { success, data, ... } -> data
 const unwrapV2 = (response) => response.data?.data ?? response.data;
 
-export const fetchFullStockSignal = async (symbol) => {
-  const response = await apiClient.get(ENDPOINTS.V2_SIGNAL_FULL(symbol), { timeout: 120000 });
+export const fetchFullStockSignal = async (symbol, { explainScreener = false } = {}) => {
+  const response = await apiClient.get(ENDPOINTS.V2_SIGNAL_FULL(symbol), {
+    timeout: 120000,
+    params: explainScreener ? { explain_screener: true } : undefined,
+  });
   return unwrapV2(response);
 };
 

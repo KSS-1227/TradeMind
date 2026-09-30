@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from agents.pipeline import run_pipeline
+from backend.portfolio_ai import generate_portfolio_report
+from backend.screener_explainer import explain_screener_prediction
 from data.fetch_prices import (
     SCREENER_UNIVERSE,
     fetch_gold_price_inr,
@@ -133,7 +135,7 @@ def health(request: Request):
 
 
 @router.get("/signal/full/{symbol}", response_model=ApiSuccessEnvelope)
-def signal_full(request: Request, symbol: str):
+def signal_full(request: Request, symbol: str, explain_screener: bool = False):
     """Complete HistoricalService analysis — single source of truth for
     AI Screener, Portfolio Doctor, Full Analysis, and WhatsApp."""
     sym = symbol.upper()
@@ -141,11 +143,13 @@ def signal_full(request: Request, symbol: str):
         sym = sym + ".NS"
     try:
         service = HistoricalService()
-        analysis = service.analyze(sym)
+        analysis = service.analyze(sym, include_explanation=not explain_screener)
         data = analysis.model_dump()
         # The full-analysis response is the UI contract. Keep nested values
         # intact so clients do not need legacy aliases or local calculations.
         data["sentiment"] = data.pop("sentiment_details", {})
+        if explain_screener:
+            data["screener_explanation"] = explain_screener_prediction(data)
         return success(request, data, "Full analysis completed successfully.")
     except ValueError as exc:
         return error(request, status_code=404, code="SYMBOL_NOT_FOUND", message=str(exc))
@@ -333,7 +337,7 @@ def portfolio_analyze(request: Request, payload: PortfolioAnalyzeRequest):
         symbol = holding.symbol.strip().upper()
         normalized = symbol if symbol.endswith(".NS") or symbol in {"GC=F", "SI=F"} else f"{symbol}.NS"
         try:
-            analysis = service.analyze(normalized)
+            analysis = service.analyze(normalized, include_explanation=False)
             invested = holding.quantity * holding.buy_price
             market_value = holding.quantity * analysis.current_price
             holdings.append({
@@ -364,10 +368,82 @@ def portfolio_analyze(request: Request, payload: PortfolioAnalyzeRequest):
             logger.exception("v2.portfolio.holding_failed", extra={"request_id": _request_id(request), "symbol": symbol})
             holdings.append({"symbol": symbol, "status": "failed", "error": {"code": "ANALYSIS_UNAVAILABLE", "message": "Could not analyze this holding."}})
 
-    successful = sum(item["status"] == "analyzed" for item in holdings)
+    successful_holdings = [item for item in holdings if item["status"] == "analyzed"]
+    successful = len(successful_holdings)
+    ai_report = None
+
+    if successful_holdings:
+        total_invested = sum(item["invested_amount"] for item in successful_holdings)
+        total_market_value = sum(item["market_value"] for item in successful_holdings)
+        risk_distribution = {
+            risk: sum(item["overall_risk"].upper() == risk for item in successful_holdings)
+            for risk in ("HIGH", "MEDIUM", "LOW")
+        }
+        trends = [item["trend"] for item in successful_holdings]
+        sentiments = [item["sentiment"] for item in successful_holdings]
+        expected_returns = [
+            item["expected_return"]
+            for item in successful_holdings
+            if item["expected_return"] is not None
+        ]
+        confidence = sum(item["confidence"] for item in successful_holdings) / successful
+        overall_risk = next(
+            risk for risk in ("HIGH", "MEDIUM", "LOW") if risk_distribution[risk]
+        )
+        portfolio_analysis = {
+            "symbol": "PORTFOLIO",
+            "portfolio_summary": {
+                "positions": successful,
+                "invested_amount": round(total_invested, 2),
+                "market_value": round(total_market_value, 2),
+                "pnl": round(total_market_value - total_invested, 2),
+                "pnl_percent": round(
+                    ((total_market_value - total_invested) / total_invested) * 100, 2
+                ) if total_invested else 0,
+                "risk_distribution": risk_distribution,
+            },
+            "holdings": [
+                {
+                    key: item[key]
+                    for key in (
+                        "symbol", "quantity", "current_price", "pnl", "pnl_percent",
+                        "recommendation", "confidence", "overall_risk", "trend",
+                        "sentiment", "agreement", "model_agreement", "reasoning",
+                    )
+                }
+                for item in successful_holdings
+            ],
+            "trend": trends[0] if len(set(trends)) == 1 else "MIXED",
+            "sentiment": sentiments[0] if len(set(sentiments)) == 1 else "mixed",
+            "recommendation": "; ".join(
+                f"{item['symbol']}: {item['recommendation']}" for item in successful_holdings
+            ),
+            "confidence": round(confidence, 2),
+            "overall_score": round(
+                sum(item["overall_score"] for item in successful_holdings) / successful, 2
+            ),
+            "overall_risk": overall_risk,
+            "expected_return": (
+                sum(expected_returns) / len(expected_returns) if expected_returns else None
+            ),
+            "agreement": "mixed" if len({item["agreement"] for item in successful_holdings}) > 1
+            else successful_holdings[0]["agreement"],
+            "model_agreement": all(item["model_agreement"] for item in successful_holdings),
+        }
+        try:
+            ai_report = generate_portfolio_report(analysis=portfolio_analysis)
+        except Exception:
+            logger.exception("v2.portfolio.explanation_failed", extra={"request_id": _request_id(request)})
+
     return success(
         request,
-        {"holdings": holdings, "count": len(holdings), "successful": successful, "failed": len(holdings) - successful},
+        {
+            "holdings": holdings,
+            "count": len(holdings),
+            "successful": successful,
+            "failed": len(holdings) - successful,
+            "ai_report": ai_report.model_dump() if ai_report else None,
+        },
         "Portfolio analyzed successfully." if successful == len(holdings) else "Portfolio analysis completed with some unavailable holdings.",
     )
 

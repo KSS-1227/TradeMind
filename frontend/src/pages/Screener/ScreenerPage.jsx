@@ -126,7 +126,7 @@ export function ScreenerPage() {
     const interval = startLoader();
 
     try {
-      const analysis = await fetchFullStockSignal(symbol);
+      const analysis = await fetchFullStockSignal(symbol, { explainScreener: true });
       stopLoader(interval);
       await new Promise((r) => setTimeout(r, 300)); // let loader reach 100%
 
@@ -193,7 +193,7 @@ export function ScreenerPage() {
       for (const m of matches) {
         const sym = (m.symbol || "").replace(".NS", "");
         try {
-          const analysis = await fetchFullStockSignal(sym);
+          const analysis = await fetchFullStockSignal(sym, { explainScreener: true });
           if (analysis) cards.push(analysis);
         } catch {
           // Match couldn't be fully analysed — skip silently

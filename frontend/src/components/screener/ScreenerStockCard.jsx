@@ -15,6 +15,7 @@ import { Card } from "../ui/Card";
 import { Badge } from "../ui/Badge";
 import { Typography } from "../ui/Typography";
 import { parseConf } from "../../utils/formatters";
+import { ScreenerExplanationPanel } from "./ScreenerExplanationPanel";
 
 export function ScreenerStockCard({
   stock,
@@ -357,6 +358,8 @@ export function ScreenerStockCard({
         <span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "var(--font-mono)" }}>{tech.volume ?? "N/A"}</span>
         </div>
       </div>
+
+      <ScreenerExplanationPanel explanation={stock.screener_explanation} />
 
       {/* Mini Recharts Sparkline */}
       {stock.history?.length > 0 && (

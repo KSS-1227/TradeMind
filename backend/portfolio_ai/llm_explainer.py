@@ -61,7 +61,7 @@ from backend.utils.logging import redact_sensitive_data
 logger = logging.getLogger(__name__)
 
 MODEL_NAME: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY")
+API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
 
 MAX_TOKENS: int = 600
 

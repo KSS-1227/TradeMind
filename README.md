@@ -152,6 +152,8 @@ in a different directory.
 | `REACT_APP_SUPABASE_URL` | Yes | Supabase frontend project URL |
 | `REACT_APP_SUPABASE_ANON_KEY` | Yes | Supabase browser authentication |
 | `OPENAI_API_KEY` | Only for `/ask` | LangChain/OpenAI question answering |
+| `GEMINI_API_KEY` | Optional | Portfolio Doctor explanations |
+| `GEMINI_SCREENER_API_KEY` | Optional | Isolated quota for ML screener explanations |
 | `TWILIO_ACCOUNT_SID` | Only for WhatsApp | Twilio account identifier |
 | `TWILIO_AUTH_TOKEN` | Only for WhatsApp | Twilio authentication |
 | `TWILIO_WHATSAPP_FROM` | Optional | WhatsApp sender, defaults to Twilio sandbox sender |
