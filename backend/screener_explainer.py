@@ -10,6 +10,8 @@ from typing import Any
 
 import requests
 
+from backend.utils.logging import redact_sensitive_data
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,9 +52,12 @@ def explain_screener_prediction(analysis: dict[str, Any]) -> dict[str, Any]:
         result["explanation_source"] = "TradeMind AI"
         return result
     except Exception as exc:
+        safe_error = redact_sensitive_data(f"{type(exc).__name__}: {exc}")
+        safe_error = safe_error.replace(api_key, "[REDACTED]")
         logger.warning(
-            "screener.gemini_explanation_failed",
-            extra={"symbol": analysis.get("symbol"), "error": str(exc)},
+            "screener.gemini_explanation_failed symbol=%s error=%s",
+            analysis.get("symbol"),
+            safe_error,
         )
         return _fallback_explanation(analysis, "TradeMind AI could not generate a written explanation right now.")
 
