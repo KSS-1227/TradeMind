@@ -211,7 +211,7 @@ class WhatsAppStockService:
             "expected_return": (
                 "-"
                 if analysis.expected_return is None
-                else f"{analysis.expected_return:.2f}%"
+                else f"{analysis.expected_return * 100:.2f}%"
             ),
             "signal": analysis.recommendation.upper(),
             "confidence": round(analysis.confidence),
