@@ -32,7 +32,7 @@ export function AIInvestmentReport({ report }) {
     "LSTM",
     "FinBERT",
     "Fusion Engine",
-    isDeterministic ? "Deterministic Fallback" : "Gemini Explanation",
+    isDeterministic ? "Deterministic Fallback" : "TradeMind Explanation",
   ];
 
   // Requirement 5: Framer Motion animation variants
