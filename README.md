@@ -1,12 +1,3 @@
----
-title: TradeMind
-emoji: 💹
-colorFrom: green
-colorTo: blue
-sdk: docker
-app_port: 7860
----
-
 # TradeMind
 
 **An explainable AI co-pilot for Indian retail investors.**
