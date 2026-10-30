@@ -1,4 +1,5 @@
 # TradeMind
+Deployed link- https://trademind-orcin.vercel.app
 
 **An explainable AI co-pilot for Indian retail investors.**
 
